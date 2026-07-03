@@ -1,0 +1,13 @@
+.logo {
+  display: inline-block;
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* dark theme (default): bright logo */
+.bright { display: block; }
+.dark { display: none; }
+
+/* light theme: dark logo */
+:global(html[data-theme='light']) .bright { display: none; }
+:global(html[data-theme='light']) .dark { display: block; }
