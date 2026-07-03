@@ -528,6 +528,191 @@
 
 .layoutModalSave:hover { filter: brightness(1.1); }
 
+.layoutModalSave:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: none;
+}
+
+/* ── Add-tables modal ─────────────────────────────────────────────── */
+
+.addTablesModal {
+  width: 95vw;
+  max-width: 1420px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  background: #1a1d27;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6);
+  padding: 24px;
+}
+
+.addTablesSearch {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: #e5e7eb;
+  font-size: 14px;
+  outline: none;
+  margin-bottom: 18px;
+  flex-shrink: 0;
+}
+
+.addTablesSearch:focus { border-color: #6366f1; }
+
+.addTablesGridWrap {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 120px;
+}
+
+.addTablesGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.addTablesEmpty {
+  padding: 48px 0;
+  text-align: center;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.addTableCard {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #13151f;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: border 0.15s, box-shadow 0.15s;
+}
+
+.addTableCard:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.addTableCardSelected {
+  border: 2px solid var(--accent, #6366f1);
+  box-shadow: 0 0 0 3px var(--accent-glow, rgba(99, 102, 241, 0.33));
+}
+
+.addTableCardCheck {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent, #6366f1);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.addTableCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--accent, #6366f1);
+}
+
+.addTableCardName {
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.addTableCardCount {
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 9px;
+}
+
+.addTableCardTags {
+  padding: 5px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.addTableCardTag {
+  font-size: 8px;
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: rgba(99, 102, 241, 0.1);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.addTableCardCols {
+  padding: 3px 0;
+}
+
+.addTableCardColRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+}
+
+.addTableCardColName {
+  flex: 1;
+  font-size: 11px;
+  color: #e5e7eb;
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.addTableCardColType {
+  font-size: 9px;
+  color: #6b7280;
+  font-family: monospace;
+  flex-shrink: 0;
+}
+
+.addTableCardBadges {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.miniBadge {
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 3px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--mb-bg, rgba(99, 102, 241, 0.2));
+  color: var(--mb-color, #6366f1);
+}
+
+.addTablesSelectedCount {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
 .groupsAllBtn:hover {
   background: rgba(255, 255, 255, 0.05);
 }

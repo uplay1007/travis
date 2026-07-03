@@ -217,6 +217,7 @@ function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<Rea
   const [activeLayoutId, setActiveLayoutId] = useState<string | null>(null)
   const [layoutsOpen, setLayoutsOpen] = useState(false)
   const [layoutSettingsId, setLayoutSettingsId] = useState<string | null>(null)
+  const [addTablesOpen, setAddTablesOpen] = useState(false)
   const layoutsBtnRef = useRef<HTMLDivElement>(null)
   // live per-layout positions (mirrors masterPositionsRef); folded into schema.layouts on save
   const layoutPosRef = useRef<Record<string, Record<string, { x: number; y: number }>>>({})
@@ -593,6 +594,62 @@ function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<Rea
     setActiveLayoutId(id)
     setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
   }, [schema, highlightCtxValue.highlighted, viewMode])
+
+  // Add tables to the active layout: existing tables keep their positions
+  // (pinned); new ones get a compact ELK layout among themselves, offset to
+  // sit beside the existing cluster, then nudged clear of any overlap.
+  const addTablesToLayout = useCallback(async (names: string[]) => {
+    if (!activeLayout || !schema || names.length === 0) return
+
+    const heights: Record<string, number> = {}
+    nodesRef.current.forEach(n => {
+      const h = (n.measured as { height?: number } | undefined)?.height
+      if (h) heights[n.id] = h
+    })
+
+    const { positions: newPositions } = await computeELKLayout(schema, heights, new Set(names))
+
+    const existingPos = layoutPosRef.current[activeLayout.id] ?? {}
+    let maxX = 0, minY = 0, any = false
+    for (const name of activeLayout.tables) {
+      const p = existingPos[name]
+      if (!p) continue
+      const w = (nodesRef.current.find(n => n.id === name)?.measured as { width?: number } | undefined)?.width ?? 280
+      maxX = any ? Math.max(maxX, p.x + w) : p.x + w
+      minY = any ? Math.min(minY, p.y) : p.y
+      any = true
+    }
+    const offsetX = any ? maxX + 200 : 0
+    const offsetY = any ? minY : 0
+
+    const rects = new Map<string, Rect>()
+    for (const name of activeLayout.tables) {
+      const p = existingPos[name]
+      if (!p) continue
+      const m = nodesRef.current.find(n => n.id === name)?.measured as { width?: number; height?: number } | undefined
+      rects.set(name, { x: p.x, y: p.y, w: m?.width ?? 280, h: m?.height ?? 120 })
+    }
+    for (const name of names) {
+      const p = newPositions[name]
+      if (!p) continue
+      rects.set(name, { x: p.x + offsetX, y: p.y + offsetY, w: 280, h: heights[name] ?? 160 })
+    }
+
+    const resolved = resolveOverlaps(rects, new Set(activeLayout.tables))
+    const posMap = { ...existingPos }
+    for (const name of names) {
+      const p = resolved.get(name)
+      if (p) posMap[name] = p
+    }
+    layoutPosRef.current[activeLayout.id] = posMap
+
+    setSchema({
+      ...schema,
+      layouts: schema.layouts!.map(l => l.id === activeLayout.id ? { ...l, tables: [...l.tables, ...names] } : l),
+    })
+    setAddTablesOpen(false)
+    setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
+  }, [activeLayout, schema])
 
   const renameLayout = useCallback((id: string, name: string) => {
     if (!schema || !name.trim()) return
@@ -1007,6 +1064,14 @@ function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<Rea
                 </button>
               )}
 
+              {/* Add-table button — appears whenever a layout is active */}
+              {activeLayout && (
+                <button className={appStyles.createLayoutFab} onClick={() => setAddTablesOpen(true)}>
+                  <span className={appStyles.createLayoutFabIcon}>＋</span>
+                  {lang === 'ru' ? 'Добавить таблицу' : 'Add table'}
+                </button>
+              )}
+
               <ViewModeCtx.Provider value={{ mode: viewMode, bulkExpand, bulkKey }}>
                 <HighlightCtx.Provider value={highlightCtxValue}>
                  <EdgeHoverCtx.Provider value={edgeHoverCtxValue}>
@@ -1081,6 +1146,16 @@ function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<Rea
           />
         )
       })()}
+
+      {addTablesOpen && activeLayout && (
+        <AddTablesModal
+          schema={schema}
+          excludeNames={new Set(activeLayout.tables)}
+          lang={lang}
+          onConfirm={addTablesToLayout}
+          onClose={() => setAddTablesOpen(false)}
+        />
+      )}
     </div>
   )
 }
@@ -1119,6 +1194,150 @@ function LayoutSettingsModal({ layout, lang, onRename, onDelete, onClose }: {
           <div className={appStyles.layoutModalFooterRight}>
             <button className={appStyles.layoutModalCancel} onClick={onClose}>{lang === 'ru' ? 'Отмена' : 'Cancel'}</button>
             <button className={appStyles.layoutModalSave} onClick={save}>{lang === 'ru' ? 'Сохранить' : 'Save'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MiniBadge({ label, color }: { label: string; color: string }) {
+  const isFK = label === 'FK'
+  const isUQ = label === 'UQ'
+  const isNull = label === '?'
+  const bg = isFK ? '#f59e0b33' : isUQ ? '#06b6d433' : isNull ? '#6b728033' : `${color}33`
+  const col = isFK ? '#f59e0b' : isUQ ? '#06b6d4' : isNull ? '#6b7280' : color
+  return (
+    <span className={appStyles.miniBadge} style={{ '--mb-bg': bg, '--mb-color': col } as React.CSSProperties}>
+      {label}
+    </span>
+  )
+}
+
+function AddTableCard({ table, selected, onClick }: {
+  table: Table
+  selected: boolean
+  onClick: (e: React.MouseEvent) => void
+}) {
+  const accent = tagColor(table.tags)
+  const cols = [
+    ...table.columns.filter(c => c.primaryKey),
+    ...table.columns.filter(c => c.foreignKey && !c.primaryKey),
+    ...table.columns.filter(c => !c.primaryKey && !c.foreignKey),
+  ]
+  return (
+    <div
+      className={`${appStyles.addTableCard} ${selected ? appStyles.addTableCardSelected : ''}`}
+      style={{ '--accent': accent } as React.CSSProperties}
+      onClick={onClick}
+    >
+      {selected && <span className={appStyles.addTableCardCheck}>✓</span>}
+      <div className={appStyles.addTableCardHeader}>
+        <span className={appStyles.addTableCardName}>{table.name}</span>
+        <span className={appStyles.addTableCardCount}>{table.columns.length} cols</span>
+      </div>
+      {table.tags && table.tags.length > 0 && (
+        <div className={appStyles.addTableCardTags}>
+          {table.tags.map(tag => <span key={tag} className={appStyles.addTableCardTag}>#{tag}</span>)}
+        </div>
+      )}
+      <div className={appStyles.addTableCardCols}>
+        {cols.map(col => (
+          <div key={col.name} className={appStyles.addTableCardColRow}>
+            <span className={appStyles.addTableCardColName}>{col.name}</span>
+            <span className={appStyles.addTableCardColType}>{col.type}</span>
+            <div className={appStyles.addTableCardBadges}>
+              {col.primaryKey && <MiniBadge label="PK" color={accent} />}
+              {col.foreignKey && <MiniBadge label="FK" color="#f59e0b" />}
+              {col.unique && !col.primaryKey && <MiniBadge label="UQ" color="#06b6d4" />}
+              {col.nullable && <MiniBadge label="?" color="#6b7280" />}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AddTablesModal({ schema, excludeNames, lang, onConfirm, onClose }: {
+  schema: Schema
+  excludeNames: Set<string>
+  lang: Lang
+  onConfirm: (names: string[]) => void
+  onClose: () => void
+}) {
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+
+  const candidates = useMemo(
+    () => schema.tables.filter(t => !excludeNames.has(t.name)),
+    [schema.tables, excludeNames]
+  )
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return q ? candidates.filter(t => t.name.toLowerCase().includes(q)) : candidates
+  }, [candidates, search])
+
+  const toggle = (name: string, shiftKey: boolean) => {
+    setSelected(prev => {
+      if (!shiftKey) return prev.has(name) && prev.size === 1 ? new Set() : new Set([name])
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+
+  return (
+    <div className={appStyles.layoutModalOverlay} onClick={onClose}>
+      <div className={appStyles.addTablesModal} onClick={e => e.stopPropagation()}>
+        <div className={appStyles.layoutModalHeader}>
+          <span className={appStyles.layoutModalTitle}>{lang === 'ru' ? 'Добавить таблицы' : 'Add tables'}</span>
+          <button className={appStyles.layoutModalClose} onClick={onClose}>×</button>
+        </div>
+
+        <input
+          className={appStyles.addTablesSearch}
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder={lang === 'ru' ? 'Поиск по имени таблицы…' : 'Search tables…'}
+          autoFocus
+        />
+
+        <div className={appStyles.addTablesGridWrap}>
+          {filtered.length === 0 ? (
+            <div className={appStyles.addTablesEmpty}>
+              {candidates.length === 0
+                ? (lang === 'ru' ? 'Все таблицы уже в этом слое' : 'All tables are already in this layout')
+                : (lang === 'ru' ? 'Ничего не найдено' : 'No tables found')}
+            </div>
+          ) : (
+            <div className={appStyles.addTablesGrid}>
+              {filtered.map(t => (
+                <AddTableCard
+                  key={t.name}
+                  table={t}
+                  selected={selected.has(t.name)}
+                  onClick={e => toggle(t.name, e.shiftKey)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className={appStyles.layoutModalFooter}>
+          <span className={appStyles.addTablesSelectedCount}>
+            {selected.size > 0 ? (lang === 'ru' ? `Выбрано: ${selected.size}` : `${selected.size} selected`) : ''}
+          </span>
+          <div className={appStyles.layoutModalFooterRight}>
+            <button className={appStyles.layoutModalCancel} onClick={onClose}>{lang === 'ru' ? 'Отмена' : 'Cancel'}</button>
+            <button
+              className={appStyles.layoutModalSave}
+              disabled={selected.size === 0}
+              onClick={() => onConfirm([...selected])}
+            >
+              {lang === 'ru' ? `Добавить (${selected.size})` : `Add (${selected.size})`}
+            </button>
           </div>
         </div>
       </div>
