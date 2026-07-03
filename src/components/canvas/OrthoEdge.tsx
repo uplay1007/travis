@@ -6,6 +6,7 @@ import {
 } from '@xyflow/react'
 import { HighlightCtx } from '../../contexts/highlight'
 import { EdgeHoverCtx } from '../../contexts/edgeHover'
+import { ThemeCtx } from '../../contexts/theme'
 import styles from './OrthoEdge.module.css'
 
 export interface OrthoEdgeData extends Record<string, unknown> {
@@ -36,6 +37,9 @@ export function OrthoEdge({
   const { label, color, relType, sourceColor, targetColor, sourceColumn, targetColumn } = (data ?? {}) as OrthoEdgeData
   const hl = useContext(HighlightCtx)
   const edgeHover = useContext(EdgeHoverCtx)
+  const theme = useContext(ThemeCtx)
+  // canvas-background halo behind the relationship label glyphs (1/n/m)
+  const labelHalo = theme === 'dark' ? '#0d0f17' : '#f4f5f7'
 
   const enterHover = () => {
     setHovered(true)
@@ -121,14 +125,14 @@ export function OrthoEdge({
         <>
           <text x={srcLabelX} y={srcLabelY} textAnchor="middle" dominantBaseline="middle"
             fontSize={10} fontWeight={700} fontFamily="monospace"
-            stroke="#0d0f17" strokeWidth={3} paintOrder="stroke"
+            stroke={labelHalo} strokeWidth={3} paintOrder="stroke"
             fill={activeColor} opacity={edgeHighlighted ? 1 : 0.7}
             style={svgTextStyle}>
             {srcLabel}
           </text>
           <text x={endLabelX} y={endLabelY} textAnchor="middle" dominantBaseline="middle"
             fontSize={10} fontWeight={700} fontFamily="monospace"
-            stroke="#0d0f17" strokeWidth={3} paintOrder="stroke"
+            stroke={labelHalo} strokeWidth={3} paintOrder="stroke"
             fill={activeColor} opacity={edgeHighlighted ? 1 : 0.7}
             style={svgTextStyle}>
             {endLabel}

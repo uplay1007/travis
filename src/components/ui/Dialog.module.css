@@ -22,8 +22,8 @@
 
 .modal {
   width: min(90vw, 440px);
-  background: #1a1d27;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-card);
+  border: 1px solid rgba(var(--overlay-rgb), 0.1);
   border-radius: 16px;
   box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
   overflow: hidden;
@@ -32,15 +32,15 @@
 
 .header {
   padding: 16px 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(var(--overlay-rgb), 0.05);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(var(--overlay-rgb), 0.05);
 }
 
 .headerTitle {
-  color: white;
+  color: var(--text-on-surface);
   font-weight: 700;
   font-size: 18px;
 }
@@ -57,7 +57,7 @@
 }
 
 .closeBtn:hover {
-  color: white;
+  color: var(--text-on-surface);
 }
 
 .body {
@@ -65,7 +65,7 @@
 }
 
 .message {
-  color: #d1d5db;
+  color: var(--text-secondary);
   font-size: 14px;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -75,11 +75,11 @@
 .promptInput {
   width: 100%;
   margin-top: 16px;
-  background: #0f1117;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-input);
+  border: 1px solid rgba(var(--overlay-rgb), 0.1);
   border-radius: 12px;
   padding: 12px 16px;
-  color: white;
+  color: var(--text-on-surface);
   outline: none;
   font-weight: 500;
   transition: border-color 0.15s;
@@ -93,18 +93,18 @@
 
 .footer {
   padding: 16px 24px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(var(--overlay-rgb), 0.05);
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid rgba(var(--overlay-rgb), 0.05);
 }
 
 .cancelBtn {
   padding: 10px 20px;
   border-radius: 12px;
-  color: #9ca3af;
+  color: var(--text-muted);
   font-size: 14px;
   font-weight: 600;
   background: none;
@@ -114,8 +114,8 @@
 }
 
 .cancelBtn:hover {
-  color: white;
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-on-surface);
+  background: rgba(var(--overlay-rgb), 0.05);
 }
 
 .confirmBtn {

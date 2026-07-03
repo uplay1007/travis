@@ -4,12 +4,53 @@
   box-sizing: border-box;
 }
 
+/* ── Theme tokens ─────────────────────────────────────────────────────
+   Dark is the default (matches the app's original hardcoded palette).
+   Light overrides flip surfaces/borders/text; saturated accent, badge,
+   and status colors (indigo, amber, cyan, green, red) stay constant
+   across themes by design — brand/semantic color, not a surface tone.
+   Shadows are left as literal black rgba() in both themes (a dark,
+   soft shadow reads correctly under light UI too). */
+:root {
+  --bg-page: #0f1117;
+  --bg-page-rgb: 15, 17, 23;
+  --bg-panel: #13151f;
+  --bg-card: #1a1d27;
+  --bg-card-rgb: 26, 29, 39;
+  --bg-input: #0a0c14;
+
+  /* shared RGB triplet for translucent borders/hover overlays —
+     rgba(var(--overlay-rgb), 0.1) etc. stays theme-aware everywhere */
+  --overlay-rgb: 255, 255, 255;
+
+  --text-bright: #e5e7eb;
+  --text-secondary: #d1d5db;
+  --text-muted: #9ca3af;
+  --text-on-surface: white;
+}
+
+:root[data-theme='light'] {
+  --bg-page: #f4f5f7;
+  --bg-page-rgb: 244, 245, 247;
+  --bg-panel: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-rgb: 255, 255, 255;
+  --bg-input: #eef0f3;
+
+  --overlay-rgb: 0, 0, 0;
+
+  --text-bright: #111827;
+  --text-secondary: #374151;
+  --text-muted: #4b5563;
+  --text-on-surface: #111827;
+}
+
 html, body, #root {
   width: 100%;
   height: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden;
-  background: #0f1117;
+  background: var(--bg-page);
   font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
 }

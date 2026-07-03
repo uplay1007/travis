@@ -8,6 +8,7 @@ import { T, type Lang } from '../../i18n'
 import { tableColor } from '../../utils/colors'
 import { useDialog } from '../../contexts/DialogContext'
 import { Logo } from '../ui/Logo'
+import { ThemeSwitch } from '../ui/ThemeSwitch'
 import styles from './UploadZone.module.css'
 
 export interface OpenResult {
@@ -21,6 +22,8 @@ export interface OpenResult {
 interface Props {
   lang: Lang
   onLangToggle: () => void
+  theme: 'dark' | 'light'
+  onThemeToggle: () => void
   onOpen: (result: OpenResult) => void
 }
 
@@ -39,7 +42,7 @@ function fmtDate(iso: string, lang: Lang) {
   })
 }
 
-export function UploadZone({ lang, onLangToggle, onOpen }: Props) {
+export function UploadZone({ lang, onLangToggle, theme, onThemeToggle, onOpen }: Props) {
   const t = T[lang]
   const dialog = useDialog()
   const { signOut, user } = useAuth()
@@ -143,6 +146,7 @@ export function UploadZone({ lang, onLangToggle, onOpen }: Props) {
           <button onClick={onLangToggle} className={styles.langBtn}>
             {lang === 'en' ? 'RU' : 'EN'}
           </button>
+          <ThemeSwitch theme={theme} onToggle={onThemeToggle} />
         </div>
       </div>
 

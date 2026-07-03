@@ -1,6 +1,6 @@
 .overlay {
   min-height: 100vh;
-  background: #0f1117;
+  background: var(--bg-page);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -8,10 +8,10 @@
 
 .card {
   width: 380px;
-  background: #1a1d27;
+  background: var(--bg-card);
   border-radius: 20px;
   padding: 36px 32px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(var(--overlay-rgb), 0.08);
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
 }
 
@@ -28,7 +28,7 @@
 }
 
 .title {
-  color: white;
+  color: var(--text-on-surface);
   font-weight: 900;
   font-size: 26px;
   letter-spacing: -0.5px;
@@ -50,10 +50,10 @@
 .input {
   width: 100%;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(var(--overlay-rgb), 0.05);
+  border: 1px solid rgba(var(--overlay-rgb), 0.1);
   border-radius: 10px;
-  color: #e5e7eb;
+  color: var(--text-bright);
   font-size: 15px;
   outline: none;
   box-sizing: border-box;
@@ -103,7 +103,7 @@
 }
 
 .successTitle {
-  color: white;
+  color: var(--text-on-surface);
   font-weight: 800;
   font-size: 22px;
   margin: 0 0 8px;
@@ -116,5 +116,5 @@
 }
 
 .successEmail {
-  color: #d1d5db;
+  color: var(--text-secondary);
 }

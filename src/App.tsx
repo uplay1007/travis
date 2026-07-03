@@ -26,6 +26,7 @@ import { TableNode, type TableNodeData, MultiSelectCtx } from './components/canv
 import { HighlightCtx, type HighlightCtxValue } from './contexts/highlight'
 import { EdgeHoverCtx, type EdgeEndpoint } from './contexts/edgeHover'
 import { ViewModeCtx, type ViewMode, type ViewModeCtxValue } from './contexts/viewMode'
+import { ThemeCtx } from './contexts/theme'
 import { OrthoEdge, type OrthoEdgeData } from './components/canvas/OrthoEdge'
 import { computeELKLayout } from './services/layoutService'
 import { resolveOverlaps, type Rect } from './utils/separateNodes'
@@ -41,6 +42,7 @@ import { DialogProvider, useDialog } from './contexts/DialogContext'
 import { useAuth } from './contexts/AuthContext'
 import { AuthScreen } from './components/auth/AuthScreen'
 import { Logo } from './components/ui/Logo'
+import { ThemeSwitch } from './components/ui/ThemeSwitch'
 import { upsertSave } from './services/schemasAPI'
 import appStyles from './App.module.css'
 
@@ -175,6 +177,15 @@ function downloadSQL(schema: Schema) {
 
 export default function App() {
   const [lang, setLang] = useState<Lang>('en')
+  const [theme, setTheme] = useState<'dark' | 'light'>(
+    () => (localStorage.getItem('travis_theme') === 'light' ? 'light' : 'dark')
+  )
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('travis_theme', theme)
+  }, [theme])
+  const toggleTheme = useCallback(() => setTheme(t => (t === 'dark' ? 'light' : 'dark')), [])
+
   const { user, loading } = useAuth()
 
   if (loading) return (
@@ -187,12 +198,17 @@ export default function App() {
 
   return (
     <DialogProvider lang={lang}>
-      <AppContent lang={lang} setLang={setLang} />
+      <AppContent lang={lang} setLang={setLang} theme={theme} onThemeToggle={toggleTheme} />
     </DialogProvider>
   )
 }
 
-function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<React.SetStateAction<Lang>> }) {
+function AppContent({ lang, setLang, theme, onThemeToggle }: {
+  lang: Lang
+  setLang: React.Dispatch<React.SetStateAction<Lang>>
+  theme: 'dark' | 'light'
+  onThemeToggle: () => void
+}) {
   const session = useMemo(() => loadCurrentSession(), [])
   const dialog = useDialog()
 
@@ -858,7 +874,7 @@ function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<Rea
   }, [applySchema])
 
   if (!schema) {
-    return <UploadZone lang={lang} onLangToggle={() => setLang(l => l === 'en' ? 'ru' : 'en')} onOpen={handleOpen} />
+    return <UploadZone lang={lang} onLangToggle={() => setLang(l => l === 'en' ? 'ru' : 'en')} theme={theme} onThemeToggle={onThemeToggle} onOpen={handleOpen} />
   }
 
   return (
@@ -898,6 +914,7 @@ function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<Rea
           >
             {lang === 'en' ? 'RU' : 'EN'}
           </button>
+          <ThemeSwitch theme={theme} onToggle={onThemeToggle} />
         </div>
       </div>
 
@@ -1084,6 +1101,7 @@ function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<Rea
                 </button>
               )}
 
+              <ThemeCtx.Provider value={theme}>
               <ViewModeCtx.Provider value={{ mode: viewMode, bulkExpand, bulkKey }}>
                 <HighlightCtx.Provider value={highlightCtxValue}>
                  <EdgeHoverCtx.Provider value={edgeHoverCtxValue}>
@@ -1111,13 +1129,13 @@ function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<Rea
                       onInit={instance => { rfInstanceRef.current = instance }}
                     >
                       <NodesInitializedFitView rfRef={rfInstanceRef} />
-                      <Background color="#1a1d27" gap={20} />
+                      <Background color={theme === 'dark' ? '#1a1d27' : '#dde0e6'} gap={20} />
                       <Controls
                         showInteractive={false}
                         className={appStyles.reactFlowControls}
                       />
                       <MiniMap
-                        style={{ background: '#13151f', borderRadius: 16, border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}
+                        style={{ background: 'var(--bg-panel)', borderRadius: 16, border: '1px solid rgba(var(--overlay-rgb),0.08)', overflow: 'hidden' }}
                         nodeColor={n => tagColor((n.data as { table?: { tags?: string[] } }).table?.tags)}
                         maskColor="rgba(0,0,0,0.6)"
                       />
@@ -1126,6 +1144,7 @@ function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<Rea
                  </EdgeHoverCtx.Provider>
                 </HighlightCtx.Provider>
               </ViewModeCtx.Provider>
+              </ThemeCtx.Provider>
 
               {/* Canvas frozen while the schema editor has errors */}
               {splitView && !schemaValid && (

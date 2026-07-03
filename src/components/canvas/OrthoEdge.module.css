@@ -12,10 +12,10 @@
   border-radius: 9999px;
   white-space: nowrap;
   user-select: none;
-  background: #1a1d27;
+  background: var(--bg-card);
   /* border, color, box-shadow set via CSS vars for dynamic accent color */
-  border: 1px solid var(--label-border, rgba(255, 255, 255, 0.2));
-  color: var(--label-color, #9ca3af);
+  border: 1px solid var(--label-border, rgba(var(--overlay-rgb), 0.2));
+  color: var(--label-color, var(--text-muted));
   box-shadow: var(--label-shadow, 0 2px 8px rgba(0, 0, 0, 0.6));
   font-weight: var(--label-weight, 400);
 }

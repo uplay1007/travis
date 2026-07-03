@@ -2,13 +2,13 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #0d0f17;
+  background: var(--bg-input);
 }
 
 .header {
   padding: 8px 12px;
   flex-shrink: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(var(--overlay-rgb), 0.06);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -34,7 +34,7 @@
   transition: all 0.15s;
   /* border, background, color set via CSS vars for active state */
   background: var(--search-bg, transparent);
-  border: 1px solid var(--search-border, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--search-border, rgba(var(--overlay-rgb), 0.08));
   color: var(--search-color, #4b5563);
 }
 
@@ -61,7 +61,7 @@
 }
 
 .log::-webkit-scrollbar { height: 4px; }
-.log::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 2px; }
+.log::-webkit-scrollbar-thumb { background: rgba(var(--overlay-rgb), 0.2); border-radius: 2px; }
 
 .logOk { color: #22c55e; }
 .logError { color: #f87171; }
@@ -76,17 +76,17 @@
 .searchBar {
   padding: 6px 12px;
   flex-shrink: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: #0a0c14;
+  border-bottom: 1px solid rgba(var(--overlay-rgb), 0.06);
+  background: var(--bg-input);
   position: relative;
 }
 
 .searchInput {
   width: 100%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(var(--overlay-rgb), 0.05);
+  border: 1px solid rgba(var(--overlay-rgb), 0.1);
   border-radius: 6px;
-  color: #e5e7eb;
+  color: var(--text-bright);
   padding: 6px 10px;
   font-size: 12px;
   outline: none;
@@ -99,8 +99,8 @@
   top: 100%;
   left: 12px;
   right: 12px;
-  background: #13151f;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-panel);
+  border: 1px solid rgba(var(--overlay-rgb), 0.1);
   border-radius: 8px;
   z-index: 100;
   overflow: hidden;
@@ -117,7 +117,7 @@
   border: none;
   border-left: 2px solid transparent;
   cursor: pointer;
-  color: #9ca3af;
+  color: var(--text-muted);
   font-size: 12px;
   font-family: monospace;
   display: block;
@@ -142,7 +142,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid rgba(var(--overlay-rgb), 0.04);
 }
 
 .showMoreBtn {
@@ -166,8 +166,8 @@
   top: 100%;
   left: 12px;
   right: 12px;
-  background: #13151f;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-panel);
+  border: 1px solid rgba(var(--overlay-rgb), 0.1);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 12px;
