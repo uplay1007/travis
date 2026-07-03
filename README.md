@@ -1,4 +1,4 @@
-<h1 align="center">🗺️ TraVis</h1>
+<h1 align="center">🗺️ TraVis - Trace and Visualize</h1>
 
 <p align="center">
   <b>Paste a schema. Get a map.</b><br/>
