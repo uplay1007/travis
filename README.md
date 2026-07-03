@@ -37,8 +37,8 @@ database, onboarding onto a legacy one, or arguing about a model with your team.
 ## 🚀 Quick start
 
 ```bash
-git clone https://github.com/uplay1007/levashov-schema-viewer.git
-cd levashov-schema-viewer
+git clone https://github.com/uplay1007/travis.git
+cd travis
 npm install
 npm run dev
 ```
