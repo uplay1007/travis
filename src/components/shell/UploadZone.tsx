@@ -1,12 +1,13 @@
 import { useState, useCallback, useEffect } from 'react'
-import { parseSchema, detectParser, type ParserType } from '../utils/parsers'
-import { openFilePicker, getHandleFromDrop, supportsFileSystemAccess } from '../utils/fileAccess'
-import { fetchSaves, deleteSave, type RemoteSave } from '../services/schemasAPI'
-import { useAuth } from '../contexts/AuthContext'
-import type { Schema } from '../types/schema'
-import { T, type Lang } from '../i18n'
-import { tableColor } from '../utils/colors'
-import { useDialog } from '../contexts/DialogContext'
+import { parseSchema, detectParser, type ParserType } from '../../utils/parsers'
+import { openFilePicker, getHandleFromDrop, supportsFileSystemAccess } from '../../utils/fileAccess'
+import { fetchSaves, deleteSave, type RemoteSave } from '../../services/schemasAPI'
+import { useAuth } from '../../contexts/AuthContext'
+import type { Schema } from '../../types/schema'
+import { T, type Lang } from '../../i18n'
+import { tableColor } from '../../utils/colors'
+import { useDialog } from '../../contexts/DialogContext'
+import { Logo } from '../ui/Logo'
 import styles from './UploadZone.module.css'
 
 export interface OpenResult {
@@ -132,7 +133,10 @@ export function UploadZone({ lang, onLangToggle, onOpen }: Props) {
   return (
     <div className={styles.root}>
       <div className={styles.nav}>
-        <span className={styles.navLogo}>DB Viewer</span>
+        <div className={styles.navBrand}>
+          <Logo size={22} />
+          <span className={styles.navLogo}>TraVis</span>
+        </div>
         <div className={styles.navRight}>
           <span className={styles.navEmail}>{user?.email}</span>
           <button onClick={signOut} className={styles.signOutBtn}>Sign out</button>

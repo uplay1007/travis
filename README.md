@@ -1,4 +1,4 @@
-<h1 align="center">🗺️ DB Viewer</h1>
+<h1 align="center">🗺️ TraVis</h1>
 
 <p align="center">
   <b>Paste a schema. Get a map.</b><br/>
@@ -19,7 +19,7 @@
 
 A relational schema usually lives as text — DDL dumps, ORM models, migration files.
 Holding 30 tables and their foreign keys in your head from that is painful.
-**DB Viewer turns the text into a map you can actually read** — for designing a new
+**TraVis turns the text into a map you can actually read** — for designing a new
 database, onboarding onto a legacy one, or arguing about a model with your team.
 
 > It maps the **structure** — tables, columns, keys, relationships. Not the row data.
@@ -37,8 +37,8 @@ database, onboarding onto a legacy one, or arguing about a model with your team.
 ## 🚀 Quick start
 
 ```bash
-git clone https://github.com/uplay1007/db-viewer.git
-cd db-viewer
+git clone https://github.com/uplay1007/levashov-schema-viewer.git
+cd levashov-schema-viewer
 npm install
 npm run dev
 ```

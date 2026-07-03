@@ -2,7 +2,7 @@ export type Lang = 'en' | 'ru'
 
 export const T = {
   en: {
-    appName: 'DB Viewer',
+    appName: 'TraVis',
     tables: 'tables',
     newTable: '+ New Table',
     loadNew: '← Load new schema',
@@ -30,7 +30,7 @@ export const T = {
     confirmDelete: (name: string) => `Delete saved schema "${name}"?`,
   },
   ru: {
-    appName: 'DB Viewer',
+    appName: 'TraVis',
     tables: 'таблиц',
     newTable: '+ Новая таблица',
     loadNew: '← Загрузить новую',

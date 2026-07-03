@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { supabase } from '../services/supabase'
+import { supabase } from '../../services/supabase'
+import { Logo } from '../ui/Logo'
 import styles from './AuthScreen.module.css'
 
 export function AuthScreen() {
@@ -48,7 +49,10 @@ export function AuthScreen() {
     <div className={styles.overlay}>
       <div className={styles.card}>
         <div className={styles.header}>
-          <span className={styles.title}>DB Viewer</span>
+          <div className={styles.titleRow}>
+            <Logo size={26} />
+            <span className={styles.title}>TraVis</span>
+          </div>
           <p className={styles.subtitle}>
             {mode === 'login' ? 'Sign in to your account' : 'Create a new account'}
           </p>

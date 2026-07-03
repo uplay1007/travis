@@ -4,8 +4,8 @@ import { EditorView } from '@codemirror/view'
 import { StreamLanguage } from '@codemirror/language'
 import { linter, type Diagnostic } from '@codemirror/lint'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { schemaToDSL, dslToSchema, type DSLDiagnostic } from '../utils/schemaDSL'
-import type { Schema } from '../types/schema'
+import { schemaToDSL, dslToSchema, type DSLDiagnostic } from '../../utils/schemaDSL'
+import type { Schema } from '../../types/schema'
 import styles from './SchemaEditor.module.css'
 
 const KEYWORDS = new Set(['Table', 'Relations'])

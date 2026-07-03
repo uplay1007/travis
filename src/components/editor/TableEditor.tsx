@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import type { Table, Column, Schema } from '../types/schema'
-import { tableColor, tagColor } from '../utils/colors'
-import { T, type Lang } from '../i18n'
-import { useDialog } from '../contexts/DialogContext'
+import type { Table, Column, Schema } from '../../types/schema'
+import { tableColor, tagColor } from '../../utils/colors'
+import { T, type Lang } from '../../i18n'
+import { useDialog } from '../../contexts/DialogContext'
 import { FKPicker } from './FKPicker'
 import styles from './TableEditor.module.css'
 

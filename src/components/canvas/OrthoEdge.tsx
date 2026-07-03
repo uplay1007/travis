@@ -4,8 +4,8 @@ import {
   EdgeLabelRenderer,
   type EdgeProps,
 } from '@xyflow/react'
-import { HighlightCtx } from '../contexts/highlight'
-import { EdgeHoverCtx } from '../contexts/edgeHover'
+import { HighlightCtx } from '../../contexts/highlight'
+import { EdgeHoverCtx } from '../../contexts/edgeHover'
 import styles from './OrthoEdge.module.css'
 
 export interface OrthoEdgeData extends Record<string, unknown> {

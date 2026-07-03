@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import type { Table, ForeignKey } from '../types/schema'
-import { tableColor } from '../utils/colors'
+import type { Table, ForeignKey } from '../../types/schema'
+import { tableColor } from '../../utils/colors'
 import styles from './FKPicker.module.css'
 
 interface Props {

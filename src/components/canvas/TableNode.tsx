@@ -1,11 +1,11 @@
 import { useState, useRef, memo, useContext, useEffect } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { tagColor } from '../utils/colors'
+import { tagColor } from '../../utils/colors'
 import { MultiSelectCtx } from './TableNode.multiselect'
-import { HighlightCtx } from '../contexts/highlight'
-import { EdgeHoverCtx } from '../contexts/edgeHover'
-import { ViewModeCtx } from '../contexts/viewMode'
-import type { Table, Column } from '../types/schema'
+import { HighlightCtx } from '../../contexts/highlight'
+import { EdgeHoverCtx } from '../../contexts/edgeHover'
+import { ViewModeCtx } from '../../contexts/viewMode'
+import type { Table, Column } from '../../types/schema'
 import styles from './TableNode.module.css'
 
 export interface TableNodeData extends Record<string, unknown> {

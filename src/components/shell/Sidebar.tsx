@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { tagColor } from '../utils/colors'
-import type { Table } from '../types/schema'
-import { T, type Lang } from '../i18n'
+import { tagColor } from '../../utils/colors'
+import type { Table } from '../../types/schema'
+import { T, type Lang } from '../../i18n'
 import styles from './Sidebar.module.css'
 
 export const SIDEBAR_W = 300

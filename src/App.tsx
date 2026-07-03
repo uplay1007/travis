@@ -22,24 +22,25 @@ import { tableColor, tagColor } from './utils/colors'
 import {
   saveCurrentSession, loadCurrentSession, clearCurrentSession,
 } from './utils/storage'
-import { TableNode, type TableNodeData, MultiSelectCtx } from './components/TableNode'
+import { TableNode, type TableNodeData, MultiSelectCtx } from './components/canvas/TableNode'
 import { HighlightCtx, type HighlightCtxValue } from './contexts/highlight'
 import { EdgeHoverCtx, type EdgeEndpoint } from './contexts/edgeHover'
 import { ViewModeCtx, type ViewMode, type ViewModeCtxValue } from './contexts/viewMode'
-import { OrthoEdge, type OrthoEdgeData } from './components/OrthoEdge'
+import { OrthoEdge, type OrthoEdgeData } from './components/canvas/OrthoEdge'
 import { computeELKLayout } from './services/layoutService'
 import { resolveOverlaps, type Rect } from './utils/separateNodes'
-import { TableEditor } from './components/TableEditor'
-import { Sidebar } from './components/Sidebar'
-import { SchemaEditor } from './components/SchemaEditor'
-import { UploadZone, type OpenResult } from './components/UploadZone'
+import { TableEditor } from './components/editor/TableEditor'
+import { Sidebar } from './components/shell/Sidebar'
+import { SchemaEditor } from './components/editor/SchemaEditor'
+import { UploadZone, type OpenResult } from './components/shell/UploadZone'
 import { writeToHandle } from './utils/fileAccess'
 import { exportSQL } from './utils/parsers/sql'
 import { schemaToStructured } from './utils/structuredJSON'
 import { T, type Lang } from './i18n'
 import { DialogProvider, useDialog } from './contexts/DialogContext'
 import { useAuth } from './contexts/AuthContext'
-import { AuthScreen } from './components/AuthScreen'
+import { AuthScreen } from './components/auth/AuthScreen'
+import { Logo } from './components/ui/Logo'
 import { upsertSave } from './services/schemasAPI'
 import appStyles from './App.module.css'
 
@@ -796,7 +797,8 @@ function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<Rea
       {/* Top bar */}
       <div className={appStyles.topbar}>
         <div className={appStyles.topbarBrand}>
-          <span className={appStyles.topbarLogo}>DB Viewer</span>
+          <Logo size={20} />
+          <span className={appStyles.topbarLogo}>TraVis</span>
           <div className={appStyles.topbarBadge}>{schema.tables.length} tables</div>
         </div>
         <div className={appStyles.topbarRight}>

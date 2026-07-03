@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react'
-import { Dialog, type DialogType } from '../components/Dialog'
+import { Dialog, type DialogType } from '../components/ui/Dialog'
 
 interface DialogState {
   isOpen: boolean
