@@ -68,16 +68,22 @@ function getRelType(table: Table, col: Column): '1:1' | '1:N' | 'N:M' {
 }
 
 // Tables whose entire FK-neighborhood (both directions) is just `focus` —
-// i.e. connected only to the focused table and to nothing else.
-function exclusiveNeighbors(tables: Table[], focus: string): string[] {
+// i.e. connected only to the focused table and to nothing else. Scoped to
+// `visibleTables`: a relation to a table outside that set (e.g. hidden by
+// the active layout or tag filter) doesn't count against exclusivity —
+// exclusivity reflects what's physically on screen, not the full schema.
+function exclusiveNeighbors(visibleTables: Table[], focus: string): string[] {
+  const visibleNames = new Set(visibleTables.map(t => t.name))
   const result: string[] = []
-  for (const t of tables) {
+  for (const t of visibleTables) {
     if (t.name === focus) continue
     const partners = new Set<string>()
     for (const col of t.columns) {
-      if (col.foreignKey && col.foreignKey.table !== t.name) partners.add(col.foreignKey.table)
+      if (col.foreignKey && col.foreignKey.table !== t.name && visibleNames.has(col.foreignKey.table)) {
+        partners.add(col.foreignKey.table)
+      }
     }
-    for (const other of tables) {
+    for (const other of visibleTables) {
       if (other.name === t.name) continue
       for (const col of other.columns) {
         if (col.foreignKey?.table === t.name) partners.add(other.name)
@@ -397,11 +403,17 @@ function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<Rea
   // Click a table header. Shift builds a manual selection group (seeded from
   // the current focus + its FK neighbors are dimmed); plain click focuses.
   const handleTableClick = useCallback((name: string, mods: { shift: boolean; alt: boolean }) => {
-    // Alt/Option: select the table + tables connected ONLY to it (exclusive satellites)
+    // Alt/Option: select the table + tables connected ONLY to it (exclusive satellites),
+    // scoped to what's physically visible right now (active layout / tag filter / all)
     if (mods.alt) {
       if (!schema) return
+      const visibleTables = activeLayout
+        ? schema.tables.filter(t => activeLayout.tables.includes(t.name))
+        : tagFilter
+        ? schema.tables.filter(t => t.tags?.includes(tagFilter))
+        : schema.tables
       setHighlightTable(name)
-      setSelectedTables(new Set([name, ...exclusiveNeighbors(schema.tables, name)]))
+      setSelectedTables(new Set([name, ...exclusiveNeighbors(visibleTables, name)]))
       return
     }
     if (mods.shift) {
@@ -418,7 +430,7 @@ function AppContent({ lang, setLang }: { lang: Lang; setLang: React.Dispatch<Rea
       setSelectedTables(new Set())
       setHighlightTable(prev => (prev === name ? null : name))
     }
-  }, [highlightTable, schema])
+  }, [highlightTable, schema, activeLayout, tagFilter])
 
   const highlightCtxValue = useMemo((): HighlightCtxValue => {
     // manual selection mode takes precedence over neighbor highlight
