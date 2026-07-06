@@ -38,9 +38,9 @@ function Badge({ label, color }: { label: string; color: string }) {
   )
 }
 
-function ColumnRow({ col, accent, linked }: { col: Column; accent: string; linked: boolean }) {
+function ColumnRow({ col, accent, linked, hidden }: { col: Column; accent: string; linked: boolean; hidden: boolean }) {
   return (
-    <div className={`${styles.columnRow} ${linked ? styles.columnRowLinked : ''}`}>
+    <div className={`${styles.columnRow} ${linked ? styles.columnRowLinked : ''} ${hidden ? styles.columnRowHidden : ''}`}>
       <span className={styles.colName}>{col.name}</span>
       <span className={styles.colType}>{col.type}</span>
       <div className={styles.badges}>
@@ -83,9 +83,17 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
 
   const showColumns = isMultiSelected ? false : expanded
 
-  const visibleColumns = viewMode === 'compact'
-    ? table.columns.filter(c => c.primaryKey || c.foreignKey)
-    : table.columns
+  // keep every column mounted so full↔compact can animate rows in/out;
+  // in compact mode the non-key rows collapse instead of unmounting.
+  const orderedColumns = [
+    ...table.columns.filter(c => c.primaryKey),
+    ...table.columns.filter(c => c.foreignKey && !c.primaryKey),
+    ...table.columns.filter(c => !c.primaryKey && !c.foreignKey),
+  ]
+  const isCompactHidden = (c: Column) => viewMode === 'compact' && !c.primaryKey && !c.foreignKey
+  const visibleCount = viewMode === 'compact'
+    ? table.columns.filter(c => c.primaryKey || c.foreignKey).length
+    : table.columns.length
 
   const handleHeaderClick = (e: React.MouseEvent) => {
     hl.onHighlight(table.name, { shift: e.shiftKey, alt: e.altKey })
@@ -111,7 +119,7 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
         <span className={styles.headerName}>{table.name}</span>
         <div className={styles.headerRight}>
           <span className={styles.colCount}>
-            {visibleColumns.length}{viewMode === 'compact' ? `/${table.columns.length}` : ''} cols
+            {visibleCount}{viewMode === 'compact' ? `/${table.columns.length}` : ''} cols
           </span>
           {!isMultiSelected && (
             <button
@@ -140,17 +148,21 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
         </div>
       )}
 
-      {showColumns && (
-        <div className={styles.columns}>
-          {[
-            ...visibleColumns.filter(c => c.primaryKey),
-            ...visibleColumns.filter(c => c.foreignKey && !c.primaryKey),
-            ...visibleColumns.filter(c => !c.primaryKey && !c.foreignKey),
-          ].map(col => (
-            <ColumnRow key={col.name} col={col} accent={accent} linked={col.name === linkedCol} />
-          ))}
+      <div className={`${styles.columnsWrap} ${showColumns ? styles.columnsOpen : ''}`}>
+        <div className={styles.columnsInner}>
+          <div className={styles.columns}>
+            {orderedColumns.map(col => (
+              <ColumnRow
+                key={col.name}
+                col={col}
+                accent={accent}
+                linked={col.name === linkedCol}
+                hidden={isCompactHidden(col)}
+              />
+            ))}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   )
 })

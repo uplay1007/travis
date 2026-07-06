@@ -116,6 +116,22 @@
   border: 1px solid rgba(99, 102, 241, 0.2);
 }
 
+/* grid-rows 0fr→1fr animates the whole body open/closed to its natural height */
+.columnsWrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.columnsOpen {
+  grid-template-rows: 1fr;
+}
+
+.columnsInner {
+  overflow: hidden;
+  min-height: 0;
+}
+
 .columns {
   padding: 4px 0;
 }
@@ -126,7 +142,20 @@
   gap: 6px;
   padding: 4px 12px;
   border-radius: 4px;
-  transition: background 0.1s;
+  max-height: 40px;
+  overflow: hidden;
+  transition: background 0.1s,
+    max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    padding 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.18s ease;
+}
+
+/* non-key row collapsed in compact mode */
+.columnRowHidden {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
 }
 
 .columnRow:hover {
