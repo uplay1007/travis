@@ -96,6 +96,31 @@ function exclusiveNeighbors(visibleTables: Table[], focus: string): string[] {
   return result
 }
 
+// The set lit by a plain click: the focused table plus every table joined to it
+// by a foreign key in either direction.
+function fkNeighborhood(tables: Table[], focus: string): Set<string> {
+  const set = new Set<string>([focus])
+  for (const t of tables) {
+    for (const col of t.columns) {
+      if (!col.foreignKey) continue
+      if (t.name === focus) set.add(col.foreignKey.table)
+      if (col.foreignKey.table === focus) set.add(t.name)
+    }
+  }
+  return set
+}
+
+// "Added to Layout 2: users, products и 10 др." — list up to CAP names, then a
+// spillover tail, keeping the toast within a few lines.
+function addedToLayoutMsg(layoutName: string, names: string[], lang: Lang): string {
+  const CAP = 5
+  const shown = names.slice(0, CAP)
+  const rest = names.length - shown.length
+  let list = shown.join(', ')
+  if (rest > 0) list += lang === 'ru' ? ` и ещё ${rest}` : ` +${rest} more`
+  return lang === 'ru' ? `Добавлено в ${layoutName}: ${list}` : `Added to ${layoutName}: ${list}`
+}
+
 function schemaToFlow(
   schema: Schema,
   onEdit: (t: Table) => void,
@@ -240,6 +265,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   const [layoutsOpen, setLayoutsOpen] = useState(false)
   const [layoutSettingsId, setLayoutSettingsId] = useState<string | null>(null)
   const [addTablesOpen, setAddTablesOpen] = useState(false)
+  const [addToLayoutOpen, setAddToLayoutOpen] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>()
+  const showToast = useCallback((msg: string) => {
+    setToast(msg)
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 3500)
+  }, [])
   const layoutsBtnRef = useRef<HTMLDivElement>(null)
   // live per-layout positions (mirrors masterPositionsRef); folded into schema.layouts on save
   const layoutPosRef = useRef<Record<string, Record<string, { x: number; y: number }>>>({})
@@ -434,10 +467,11 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     }
     if (mods.shift) {
       setSelectedTables(prev => {
-        if (prev.size === 0) {
-          return highlightTable ? new Set([highlightTable, name]) : new Set([name])
-        }
-        const next = new Set(prev)
+        // First shift-click seeds the selection with the whole lit set (focus +
+        // its FK-neighbors) so those neighbors stay put instead of collapsing.
+        const next = prev.size > 0
+          ? new Set(prev)
+          : (highlightTable && schema ? fkNeighborhood(schema.tables, highlightTable) : new Set<string>())
         if (next.has(name)) next.delete(name)
         else next.add(name)
         return next
@@ -458,14 +492,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     if (!highlightTable || !schema) {
       return { active: false, highlighted: new Set(), focusTable: null, groupMode: false, onHighlight: handleTableClick }
     }
-    const set = new Set<string>([highlightTable])
-    for (const t of schema.tables) {
-      for (const col of t.columns) {
-        if (!col.foreignKey) continue
-        if (t.name === highlightTable) set.add(col.foreignKey.table)
-        if (col.foreignKey.table === highlightTable) set.add(t.name)
-      }
-    }
+    const set = fkNeighborhood(schema.tables, highlightTable)
     return { active: true, highlighted: set, focusTable: highlightTable, groupMode: false, onHighlight: handleTableClick }
   }, [highlightTable, selectedTables, schema, handleTableClick, clearHighlight])
 
@@ -623,11 +650,16 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
   }, [schema, highlightCtxValue.highlighted, viewMode])
 
-  // Add tables to the active layout: existing tables keep their positions
-  // (pinned); new ones get a compact ELK layout among themselves, offset to
-  // sit beside the existing cluster, then nudged clear of any overlap.
-  const addTablesToLayout = useCallback(async (names: string[]) => {
-    if (!activeLayout || !schema || names.length === 0) return
+  // Add tables to a layout (the active one by default, or `targetLayoutId` for
+  // a cross-layout add): tables already in the target are skipped; existing
+  // ones keep their positions (pinned); genuinely new ones get a compact ELK
+  // layout among themselves, offset to sit beside the existing cluster, then
+  // nudged clear of any overlap.
+  const addTablesToLayout = useCallback(async (names: string[], targetLayoutId?: string) => {
+    const target = targetLayoutId ? schema?.layouts?.find(l => l.id === targetLayoutId) : activeLayout
+    if (!target || !schema) return
+    const newNames = names.filter(n => !target.tables.includes(n))
+    if (newNames.length === 0) return
 
     const heights: Record<string, number> = {}
     nodesRef.current.forEach(n => {
@@ -635,11 +667,11 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       if (h) heights[n.id] = h
     })
 
-    const { positions: newPositions } = await computeELKLayout(schema, heights, new Set(names))
+    const { positions: newPositions } = await computeELKLayout(schema, heights, new Set(newNames))
 
-    const existingPos = layoutPosRef.current[activeLayout.id] ?? {}
+    const existingPos = layoutPosRef.current[target.id] ?? {}
     let maxX = 0, minY = 0, any = false
-    for (const name of activeLayout.tables) {
+    for (const name of target.tables) {
       const p = existingPos[name]
       if (!p) continue
       const w = (nodesRef.current.find(n => n.id === name)?.measured as { width?: number } | undefined)?.width ?? 280
@@ -651,33 +683,36 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     const offsetY = any ? minY : 0
 
     const rects = new Map<string, Rect>()
-    for (const name of activeLayout.tables) {
+    for (const name of target.tables) {
       const p = existingPos[name]
       if (!p) continue
       const m = nodesRef.current.find(n => n.id === name)?.measured as { width?: number; height?: number } | undefined
       rects.set(name, { x: p.x, y: p.y, w: m?.width ?? 280, h: m?.height ?? 120 })
     }
-    for (const name of names) {
+    for (const name of newNames) {
       const p = newPositions[name]
       if (!p) continue
       rects.set(name, { x: p.x + offsetX, y: p.y + offsetY, w: 280, h: heights[name] ?? 160 })
     }
 
-    const resolved = resolveOverlaps(rects, new Set(activeLayout.tables))
+    const resolved = resolveOverlaps(rects, new Set(target.tables))
     const posMap = { ...existingPos }
-    for (const name of names) {
+    for (const name of newNames) {
       const p = resolved.get(name)
       if (p) posMap[name] = p
     }
-    layoutPosRef.current[activeLayout.id] = posMap
+    layoutPosRef.current[target.id] = posMap
 
     setSchema({
       ...schema,
-      layouts: schema.layouts!.map(l => l.id === activeLayout.id ? { ...l, tables: [...l.tables, ...names] } : l),
+      layouts: schema.layouts!.map(l => l.id === target.id ? { ...l, tables: [...l.tables, ...newNames] } : l),
     })
-    setAddTablesOpen(false)
-    setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
-  }, [activeLayout, schema])
+    showToast(addedToLayoutMsg(target.name, newNames, lang))
+    if (target.id === activeLayout?.id) {
+      setAddTablesOpen(false)
+      setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
+    }
+  }, [activeLayout, schema, showToast, lang])
 
   const renameLayout = useCallback((id: string, name: string) => {
     if (!schema || !name.trim()) return
@@ -1100,6 +1135,41 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
                   {lang === 'ru' ? 'Добавить таблицу' : 'Add table'}
                 </button>
               )}
+
+              {/* Add-to-layout — quick-add the selection to any OTHER existing layout */}
+              {highlightCtxValue.highlighted.size > 0 && (schema.layouts ?? []).some(l => l.id !== activeLayoutId) && (
+                <div className={appStyles.addToLayoutWrap}>
+                  <button
+                    className={`${appStyles.createLayoutFab} ${appStyles.fabInWrap}`}
+                    onClick={() => setAddToLayoutOpen(o => !o)}
+                  >
+                    <span className={appStyles.createLayoutFabIcon}>⤵</span>
+                    {lang === 'ru' ? 'Добавить в слой' : 'Add to layout'}
+                    <span className={appStyles.createLayoutFabCount}>{highlightCtxValue.highlighted.size}</span>
+                  </button>
+                  {addToLayoutOpen && (
+                    <div className={appStyles.addToLayoutMenu}>
+                      {(schema.layouts ?? []).filter(l => l.id !== activeLayoutId).map(l => (
+                        <button
+                          key={l.id}
+                          className={appStyles.addToLayoutItem}
+                          onClick={() => {
+                            addTablesToLayout([...highlightCtxValue.highlighted], l.id)
+                            setAddToLayoutOpen(false)
+                            setSelectedTables(new Set()); setHighlightTable(null)
+                          }}
+                        >
+                          <span>{l.name}</span>
+                          <span className={appStyles.addToLayoutItemCount}>{l.tables.length}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Toast — top-right of the canvas, below the topbar */}
+              {toast && <div className={appStyles.toast}>{toast}</div>}
 
               <ThemeCtx.Provider value={theme}>
               <ViewModeCtx.Provider value={{ mode: viewMode, bulkExpand, bulkKey }}>
