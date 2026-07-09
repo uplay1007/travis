@@ -10,6 +10,7 @@ export interface CurrentSession {
   positions: Record<string, { x: number; y: number }>
   saveId?: string
   saveName?: string
+  activeLayoutId?: string | null   // layout the user was viewing, restored on reload
 }
 
 export function saveCurrentSession(data: Omit<CurrentSession, 'v'>) {

@@ -263,6 +263,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [activeLayoutId, setActiveLayoutId] = useState<string | null>(null)
+  // mirror of activeLayoutId for use inside save callbacks without dep churn
+  const activeLayoutIdRef = useRef<string | null>(null)
+  useEffect(() => { activeLayoutIdRef.current = activeLayoutId }, [activeLayoutId])
   const [layoutsOpen, setLayoutsOpen] = useState(false)
   const [layoutSettingsId, setLayoutSettingsId] = useState<string | null>(null)
   const [addTablesOpen, setAddTablesOpen] = useState(false)
@@ -768,7 +771,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       (schemaToUse.layouts ?? []).map(l => [l.id, layoutPosRef.current[l.id] ?? { ...l.positions }])
     )
     setSchema(schemaToUse)
-    saveCurrentSession({ schema: schemaToUse, positions: masterPositionsRef.current, saveId: currentSaveIdRef.current, saveName: currentSaveName.current ?? undefined })
+    saveCurrentSession({ schema: schemaToUse, positions: masterPositionsRef.current, saveId: currentSaveIdRef.current, saveName: currentSaveName.current ?? undefined, activeLayoutId: activeLayoutIdRef.current })
     const { nodes: n, edges: e } = schemaToFlow(schemaToUse, handleEdit, masterPositionsRef.current, currentNodes)
     setNodes(n)
     setEdges(e)
@@ -783,16 +786,25 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       applySchema(session.schema, undefined, session.positions)
       const hasPositions = session.positions && Object.keys(session.positions).length > 0
       if (!hasPositions) setTimeout(() => setPendingELK(true), 250)
+      // restore the layout the user was viewing before the reload
+      const savedLayout = session.activeLayoutId
+        ? session.schema.layouts?.find(l => l.id === session.activeLayoutId)
+        : null
+      if (savedLayout) {
+        setActiveLayoutId(savedLayout.id)
+        applyViewMode(savedLayout.viewMode ?? 'full')
+        setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 150)
+      }
     }
-  }, [session, applySchema])
+  }, [session, applySchema, applyViewMode])
 
   useEffect(() => {
     if (nodes.length === 0 || !schema) return
     const handle = setTimeout(() => {
-      saveCurrentSession({ schema: serializeSchema(schema), positions: masterPositionsRef.current, saveId: currentSaveIdRef.current, saveName: currentSaveName.current ?? undefined })
+      saveCurrentSession({ schema: serializeSchema(schema), positions: masterPositionsRef.current, saveId: currentSaveIdRef.current, saveName: currentSaveName.current ?? undefined, activeLayoutId: activeLayoutIdRef.current })
     }, 1000)
     return () => clearTimeout(handle)
-  }, [nodes, schema, serializeSchema])
+  }, [nodes, schema, serializeSchema, activeLayoutId])
 
   const handleSave = useCallback(async () => {
     if (!schema) return
