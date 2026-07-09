@@ -355,6 +355,17 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     [schema, activeLayoutId]
   )
 
+  // The position a node is actually showing right now, mirroring displayNodes'
+  // per-view source of truth. Drag math (group-drag origins, overlap rects)
+  // must read this — not the raw node.position — because the base `nodes`
+  // array only holds master/all-tables coordinates; a table's layout-specific
+  // position lives in layoutPosRef and is otherwise applied at render time only.
+  const resolvedPosition = useCallback((n: Node): { x: number; y: number } => {
+    if (activeLayout) return layoutPosRef.current[activeLayout.id]?.[n.id] ?? n.position
+    if (!tagFilter) return masterPositionsRef.current[n.id] ?? n.position
+    return n.position
+  }, [activeLayout, tagFilter])
+
   const displayNodes = useMemo(() => {
     if (activeLayout) {
       const visible = new Set(activeLayout.tables)
@@ -610,9 +621,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     groupDragOrigins.current = Object.fromEntries(
       nodes
         .filter(n => highlightCtxValue.highlighted.has(n.id))
-        .map(n => [n.id, { x: n.position.x, y: n.position.y }])
+        .map(n => [n.id, resolvedPosition(n)])
     )
-  }, [highlightCtxValue.highlighted, nodes])
+  }, [highlightCtxValue.highlighted, nodes, resolvedPosition])
 
   const handleNodeDrag = useCallback((_e: MouseEvent | TouchEvent, node: Node) => {
     const isHighlighted = highlightCtxValue.highlighted.has(node.id)
@@ -646,7 +657,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     for (const n of current) {
       if (visibleSet && !visibleSet.has(n.id)) continue
       const m = n.measured as { width?: number; height?: number } | undefined
-      rects.set(n.id, { x: n.position.x, y: n.position.y, w: m?.width ?? 280, h: m?.height ?? 120 })
+      const p = resolvedPosition(n)
+      rects.set(n.id, { x: p.x, y: p.y, w: m?.width ?? 280, h: m?.height ?? 120 })
     }
 
     // pin only the grabbed node; everything else (incl. highlighted FK
@@ -660,7 +672,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       if (!p || (p.x === n.position.x && p.y === n.position.y)) return n
       return { ...n, position: p }
     }))
-  }, [setNodes, persistPos, activeLayout])
+  }, [setNodes, persistPos, activeLayout, resolvedPosition])
 
   // ── Layouts ────────────────────────────────────────────────────────────
   const selectLayout = useCallback((id: string | null) => {
