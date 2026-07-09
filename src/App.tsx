@@ -140,6 +140,18 @@ function schemaToFlow(
       )
     : {}
 
+  // columns that some other table's FK points at — each becomes a dedicated
+  // connection point instead of every edge bunching at the node's one dot
+  const referencedColumns = new Map<string, Set<string>>()
+  for (const table of schema.tables) {
+    for (const col of table.columns) {
+      if (!col.foreignKey || col.foreignKey.table === table.name) continue
+      const set = referencedColumns.get(col.foreignKey.table) ?? new Set<string>()
+      set.add(col.foreignKey.column)
+      referencedColumns.set(col.foreignKey.table, set)
+    }
+  }
+
   const nodes: Node[] = schema.tables.map(table => ({
     id: table.name,
     type: 'table',
@@ -148,7 +160,7 @@ function schemaToFlow(
       savedPositions?.[table.name] ??
       layoutMap[table.name] ??
       { x: 0, y: 0 },
-    data: { table, onEdit } satisfies TableNodeData,
+    data: { table, onEdit, referencedColumns: referencedColumns.get(table.name) } satisfies TableNodeData,
   }))
 
   const tableMap = new Map(schema.tables.map(t => [t.name, t]))
@@ -167,6 +179,8 @@ function schemaToFlow(
       edges.push({
         id: key, source: table.name, target,
         type: 'fk',
+        sourceHandle: `col-${col.name}`,
+        targetHandle: `col-${col.foreignKey.column}`,
         data: {
           label: `${col.name} → ${col.foreignKey.column}`,
           color: '#4b5563',

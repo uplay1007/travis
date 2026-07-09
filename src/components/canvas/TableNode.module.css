@@ -149,6 +149,7 @@
 }
 
 .columnRow {
+  position: relative; /* anchors the per-column connection handles */
   display: flex;
   align-items: center;
   gap: 6px;

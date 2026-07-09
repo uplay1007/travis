@@ -11,7 +11,12 @@ import styles from './TableNode.module.css'
 export interface TableNodeData extends Record<string, unknown> {
   table: Table
   onEdit: (table: Table) => void
+  // names of this table's columns that some other table's FK points at —
+  // used to attach a connection handle only where an edge actually lands
+  referencedColumns?: Set<string>
 }
+
+const EMPTY_SET = new Set<string>()
 
 export { MultiSelectCtx }
 
@@ -43,9 +48,21 @@ function Badge({ label, color }: { label: string; color: string }) {
   )
 }
 
-function ColumnRow({ col, accent, linked, hidden }: { col: Column; accent: string; linked: boolean; hidden: boolean }) {
+function ColumnRow({ col, accent, linked, hidden, referenced }: {
+  col: Column; accent: string; linked: boolean; hidden: boolean; referenced: boolean
+}) {
   return (
     <div className={`${styles.columnRow} ${linked ? styles.columnRowLinked : ''} ${hidden ? styles.columnRowHidden : ''}`}>
+      {/* per-column connection points: edges attach to the row that actually
+          holds the FK / the referenced key, instead of a single node-wide dot */}
+      {referenced && (
+        <Handle type="target" position={Position.Left} id={`col-${col.name}`}
+          style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
+      )}
+      {col.foreignKey && (
+        <Handle type="source" position={Position.Right} id={`col-${col.name}`}
+          style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
+      )}
       <span className={styles.colName}>{col.name}</span>
       <span className={styles.colType}>{col.type}</span>
       <div className={styles.badges}>
@@ -59,7 +76,7 @@ function ColumnRow({ col, accent, linked, hidden }: { col: Column; accent: strin
 }
 
 export const TableNode = memo(({ data, selected }: NodeProps) => {
-  const { table, onEdit } = data as TableNodeData
+  const { table, onEdit, referencedColumns = EMPTY_SET } = data as TableNodeData
   const [expanded, setExpanded] = useState(true)
   const multiSelectActive = useContext(MultiSelectCtx)
   const hl = useContext(HighlightCtx)
@@ -117,9 +134,6 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
       className={nodeClass}
       style={{ '--accent': accent, '--accent-glow': `${accent}55`, '--accent-glow2': `${accent}44` } as React.CSSProperties}
     >
-      <Handle type="target" position={Position.Left} style={{ opacity: 0, width: 8, height: 8 }} />
-      <Handle type="source" position={Position.Right} style={{ opacity: 0, width: 8, height: 8 }} />
-
       <div className={styles.header} onClick={handleHeaderClick}>
         <span className={styles.headerName}>{table.name}</span>
         {table.type && <span className={styles.typeBadge}>{TYPE_LABEL[table.type]}</span>}
@@ -164,6 +178,7 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
                 accent={accent}
                 linked={col.name === linkedCol}
                 hidden={isCompactHidden(col)}
+                referenced={referencedColumns.has(col.name)}
               />
             ))}
           </div>
