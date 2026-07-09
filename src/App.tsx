@@ -798,8 +798,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   useEffect(() => {
     if (session) {
       applySchema(session.schema, undefined, session.positions)
-      const hasPositions = session.positions && Object.keys(session.positions).length > 0
-      if (!hasPositions) setTimeout(() => setPendingELK(true), 250)
       // restore the layout the user was viewing before the reload
       const savedLayout = session.activeLayoutId
         ? session.schema.layouts?.find(l => l.id === session.activeLayoutId)
@@ -809,6 +807,12 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
         applyViewMode(savedLayout.viewMode ?? 'full')
         setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 150)
       }
+      // auto-arrange only if the view actually being shown (the restored layout,
+      // or the all-tables view) has no positions yet — session.positions is always
+      // the all-tables ones, which says nothing about a just-restored layout
+      const shownPositions = savedLayout ? savedLayout.positions : session.positions
+      const hasPositions = shownPositions && Object.keys(shownPositions).length > 0
+      if (!hasPositions) setTimeout(() => setPendingELK(true), 250)
     }
   }, [session, applySchema, applyViewMode])
 
