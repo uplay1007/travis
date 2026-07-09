@@ -558,6 +558,13 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
         masterPositionsRef.current = { ...positions }
       }
       setNodes(prev => prev.map(n => ({ ...n, position: positions[n.id] ?? n.position })))
+      // save immediately — Organize is a deliberate "commit this result" action,
+      // so it can't be left to the 1s drag-debounced autosave: a reload before
+      // that timer fires would silently revert to the pre-Organize positions
+      const schemaOut = schema.layouts?.length
+        ? { ...schema, layouts: schema.layouts.map(l => ({ ...l, positions: layoutPosRef.current[l.id] ?? l.positions })) }
+        : schema
+      saveCurrentSession({ schema: schemaOut, positions: masterPositionsRef.current, saveId: currentSaveIdRef.current, saveName: currentSaveName.current ?? undefined, activeLayoutId: activeLayoutIdRef.current })
       // re-frame the camera on the freshly arranged tables
       setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
     } catch (err) {
@@ -816,13 +823,19 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     }
   }, [session, applySchema, applyViewMode])
 
+  // immediate, un-debounced session save — used right after a computed
+  // (non-drag) position change, e.g. Organize, so a fast reload can't race
+  // past the drag-debounced autosave below and revert to a stale snapshot
+  const persistSessionNow = useCallback(() => {
+    if (!schema) return
+    saveCurrentSession({ schema: serializeSchema(schema), positions: masterPositionsRef.current, saveId: currentSaveIdRef.current, saveName: currentSaveName.current ?? undefined, activeLayoutId: activeLayoutIdRef.current })
+  }, [schema, serializeSchema])
+
   useEffect(() => {
     if (nodes.length === 0 || !schema) return
-    const handle = setTimeout(() => {
-      saveCurrentSession({ schema: serializeSchema(schema), positions: masterPositionsRef.current, saveId: currentSaveIdRef.current, saveName: currentSaveName.current ?? undefined, activeLayoutId: activeLayoutIdRef.current })
-    }, 1000)
+    const handle = setTimeout(persistSessionNow, 1000)
     return () => clearTimeout(handle)
-  }, [nodes, schema, serializeSchema, activeLayoutId])
+  }, [nodes, schema, persistSessionNow])
 
   const handleSave = useCallback(async () => {
     if (!schema) return
