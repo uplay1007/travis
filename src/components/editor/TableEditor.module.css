@@ -363,6 +363,20 @@
   width: 110px;
 }
 
+.typeSelect {
+  background: var(--bg-input);
+  color: var(--text-on-surface);
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  outline: none;
+  border: 1px solid rgba(var(--overlay-rgb), 0.1);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.typeSelect:focus { border-color: rgba(var(--overlay-rgb), 0.3); }
+
 .tagAddBtn {
   background: rgba(99, 102, 241, 0.2);
   color: #a5b4fc;

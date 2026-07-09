@@ -1,4 +1,4 @@
-import type { Schema, Table, Column, Layout } from '../types/schema'
+import type { Schema, Table, Column, Layout, TableType } from '../types/schema'
 import { tagColor } from './colors'
 
 // ── Public JSON format ─────────────────────────────────────────────────────
@@ -14,6 +14,7 @@ export interface StructuredColumn {
 }
 export interface StructuredTable {
   name: string
+  type?: TableType
   columns: StructuredColumn[]
 }
 export interface StructuredLayout {
@@ -42,6 +43,7 @@ export function isStructuredSchema(raw: unknown): raw is StructuredSchema {
 export function schemaToStructured(schema: Schema): StructuredSchema {
   const Tables: StructuredTable[] = schema.tables.map(t => ({
     name: t.name,
+    ...(t.type ? { type: t.type } : {}),
     columns: t.columns.map(c => {
       const col: StructuredColumn = { name: c.name, type: c.type }
       if (c.primaryKey) col.pk = true
@@ -95,7 +97,9 @@ export function structuredToSchema(raw: StructuredSchema): Schema {
       if (c.unique) col.unique = true
       return col
     })
-    return { name: t.name, columns, tags: [] }
+    const table: Table = { name: t.name, columns, tags: [] }
+    if (t.type) table.type = t.type
+    return table
   })
 
   const byName = new Map(tables.map(t => [t.name, t]))

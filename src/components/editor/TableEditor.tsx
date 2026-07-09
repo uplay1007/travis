@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Table, Column, Schema } from '../../types/schema'
+import type { Table, Column, Schema, TableType } from '../../types/schema'
 import { tableColor, tagColor } from '../../utils/colors'
 import { T, type Lang } from '../../i18n'
 import { useDialog } from '../../contexts/DialogContext'
@@ -19,6 +19,16 @@ const COMMON_TYPES = [
 function emptyCol(): Column {
   return { name: '', type: 'varchar', nullable: true }
 }
+
+// architectural role options, shown in the editor's Type selector
+const TABLE_TYPES: { value: TableType; en: string; ru: string }[] = [
+  { value: 'reference',   en: 'Reference',     ru: 'Справочник' },
+  { value: 'master',      en: 'Master',        ru: 'Мастер-данные' },
+  { value: 'transaction', en: 'Transactional', ru: 'Транзакционная' },
+  { value: 'link',        en: 'Link (M:N)',    ru: 'Связка (M:N)' },
+  { value: 'dimension',   en: 'Dimension',     ru: 'Измерение' },
+  { value: 'fact',        en: 'Fact',          ru: 'Факт' },
+]
 
 function Checkbox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -57,6 +67,7 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
   )
   const [nameError, setNameError] = useState('')
   const [tags, setTags] = useState<string[]>(table?.tags ?? [])
+  const [tableType, setTableType] = useState<TableType | ''>(table?.type ?? '')
   const [tagInput, setTagInput] = useState('')
   const [isDirty, setIsDirty] = useState(false)
   const [fkPickerRow, setFkPickerRow] = useState<number | null>(null)
@@ -105,7 +116,9 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
     const nameConflict = schema.tables.find(tb => tb.name === trimmedName && tb.name !== table?.name)
     if (nameConflict) { setNameError('Already exists'); return }
 
-    onSave({ name: trimmedName, columns, tags: finalTags }, isNew ? null : table!.name)
+    const saved: Table = { name: trimmedName, columns, tags: finalTags }
+    if (tableType) saved.type = tableType
+    onSave(saved, isNew ? null : table!.name)
   }
 
   const otherTables = schema.tables.filter(tb => tb.name !== (table?.name ?? ''))
@@ -245,6 +258,19 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
         </div>
 
         <div className={styles.tagsSection}>
+          <div className={styles.tagsRow}>
+            <span className={styles.tagsLabel}>{lang === 'ru' ? 'Тип:' : 'Type:'}</span>
+            <select
+              className={styles.typeSelect}
+              value={tableType}
+              onChange={e => { setTableType(e.target.value as TableType | ''); setIsDirty(true) }}
+            >
+              <option value="">{lang === 'ru' ? '— не задан —' : '— none —'}</option>
+              {TABLE_TYPES.map(tt => (
+                <option key={tt.value} value={tt.value}>{lang === 'ru' ? tt.ru : tt.en}</option>
+              ))}
+            </select>
+          </div>
           <div className={styles.tagsRow}>
             <span className={styles.tagsLabel}>Tags:</span>
             {tags.map(tag => (

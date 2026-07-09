@@ -12,10 +12,15 @@ export interface Column {
   unique?: boolean
 }
 
+// Architectural role of a table (data-modeling classification), independent of
+// the free-form tags. Drives coloring, filtering and layout plugins.
+export type TableType = 'reference' | 'master' | 'transaction' | 'link' | 'dimension' | 'fact'
+
 export interface Table {
   name: string
   columns: Column[]
   tags?: string[]
+  type?: TableType
 }
 
 export interface Layout {

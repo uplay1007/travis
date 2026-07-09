@@ -15,6 +15,11 @@ export interface TableNodeData extends Record<string, unknown> {
 
 export { MultiSelectCtx }
 
+// short header label per architectural table type
+const TYPE_LABEL: Record<string, string> = {
+  reference: 'REF', master: 'MASTER', transaction: 'TX', link: 'LINK', dimension: 'DIM', fact: 'FACT',
+}
+
 const BADGE_COLORS: Record<string, { bg: string; color: string }> = {
   pk:  { bg: 'transparent', color: 'transparent' }, // set dynamically
   fk:  { bg: '#f59e0b33', color: '#f59e0b' },
@@ -117,6 +122,7 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
 
       <div className={styles.header} onClick={handleHeaderClick}>
         <span className={styles.headerName}>{table.name}</span>
+        {table.type && <span className={styles.typeBadge}>{TYPE_LABEL[table.type]}</span>}
         <div className={styles.headerRight}>
           <span className={styles.colCount}>
             {visibleCount}{viewMode === 'compact' ? `/${table.columns.length}` : ''} cols
