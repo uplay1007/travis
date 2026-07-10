@@ -8,6 +8,8 @@ import {
   useNodesState,
   useEdgesState,
   useNodesInitialized,
+  useReactFlow,
+  useUpdateNodeInternals,
   type Node,
   type Edge,
   type OnSelectionChangeParams,
@@ -37,7 +39,7 @@ import { UploadZone, type OpenResult } from './components/shell/UploadZone'
 import { writeToHandle } from './utils/fileAccess'
 import { exportSQL } from './utils/parsers/sql'
 import { schemaToStructured } from './utils/structuredJSON'
-import { exportDrawio } from './utils/drawioExport'
+import { exportDrawio, type DrawioPage } from './utils/drawioExport'
 import { T, type Lang } from './i18n'
 import { DialogProvider, useDialog } from './contexts/DialogContext'
 import { useAuth } from './contexts/AuthContext'
@@ -50,16 +52,27 @@ import appStyles from './App.module.css'
 const NODE_TYPES = { table: TableNode }
 const EDGE_TYPES = { fk: OrthoEdge }
 
-function NodesInitializedFitView({ rfRef }: { rfRef: React.RefObject<ReactFlowInstance<any, any> | null> }) {
+function NodesInitializedFitView({ rfRef }: {
+  rfRef: React.RefObject<ReactFlowInstance<any, any> | null>
+}) {
   const initialized = useNodesInitialized()
+  const rf = useReactFlow()
+  const updateNodeInternals = useUpdateNodeInternals()
   const didFit = useRef(false)
   useEffect(() => {
+    if (!initialized) return
     // fit once per mount (fresh schema open); never on later node re-inits (edits)
-    if (initialized && !didFit.current) {
+    if (!didFit.current) {
       didFit.current = true
       rfRef.current?.fitView({ padding: 0.2, duration: 300 })
     }
-  }, [initialized, rfRef])
+    // Re-register every node's handles once nodes are measured. On a fast
+    // schema swap (exit → open), edges can be committed before React Flow has
+    // registered the brand-new nodes' handles, leaving their source/target
+    // unresolved so no <path> is drawn — until a manual reopen. Forcing a
+    // handle recompute here resolves them without the reopen.
+    updateNodeInternals(rf.getNodes().map(n => n.id))
+  }, [initialized, rfRef, rf, updateNodeInternals])
   return null
 }
 
@@ -396,24 +409,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     const visibleNames = new Set(schema.tables.filter(t => t.tags?.includes(tagFilter)).map(t => t.name))
     return edges.filter(e => visibleNames.has(e.source) && visibleNames.has(e.target))
   }, [edges, tagFilter, schema, activeLayout])
-
-  // Export the currently displayed view (active layout / tag filter / all tables)
-  // to a draw.io file, reusing the on-screen positions so the diagram matches.
-  const handleExportDrawio = useCallback(() => {
-    if (!schema) return
-    const visibleNodes = displayNodes.filter(n => !n.hidden)
-    const names = new Set(visibleNodes.map(n => n.id))
-    const positions: Record<string, { x: number; y: number }> = {}
-    visibleNodes.forEach(n => { positions[n.id] = { x: n.position.x, y: n.position.y } })
-    const tables = schema.tables.filter(t => names.has(t.name))
-    const blob = new Blob([exportDrawio(tables, positions)], { type: 'application/xml' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${activeLayout?.name ?? 'schema'}.drawio`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [schema, displayNodes, activeLayout])
 
   const handleSelectionChange = useCallback(({ nodes: sel }: OnSelectionChangeParams) => {
     setMultiSelectActive(sel.length > 1)
@@ -791,6 +786,33 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     return { ...s, layouts: s.layouts.map(l => ({ ...l, positions: layoutPosRef.current[l.id] ?? l.positions })) }
   }, [])
 
+  // Export the whole schema to a draw.io file — one page per TraVis layout
+  // plus an "All tables" page, switchable as tabs in draw.io (like sheets in
+  // a spreadsheet), each keeping that view's own table set and positions.
+  const handleExportDrawio = useCallback(() => {
+    if (!schema) return
+    const schemaOut = serializeSchema(schema)
+    const pages: DrawioPage[] = [
+      {
+        name: lang === 'ru' ? 'Все таблицы' : 'All tables',
+        tables: schemaOut.tables,
+        positions: masterPositionsRef.current,
+      },
+      ...(schemaOut.layouts ?? []).map(l => ({
+        name: l.name,
+        tables: schemaOut.tables.filter(t => l.tables.includes(t.name)),
+        positions: l.positions,
+      })),
+    ]
+    const blob = new Blob([exportDrawio(pages)], { type: 'application/xml' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'schema.drawio'
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [schema, serializeSchema, lang])
+
   const applySchema = useCallback((
     s: Schema,
     currentNodes?: Node[],
@@ -1009,7 +1031,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
             ↓ SQL
           </button>
           <button
-            onClick={() => { handleExportDrawio(); dialog.alert(lang === 'ru' ? 'Экспорт draw.io' : 'draw.io Export', lang === 'ru' ? 'Файл .drawio текущего вида успешно скачан.' : 'The .drawio file for the current view has been downloaded.') }}
+            onClick={() => { handleExportDrawio(); dialog.alert(lang === 'ru' ? 'Экспорт draw.io' : 'draw.io Export', lang === 'ru' ? 'Файл .drawio со всеми лэйаутами (вкладками) успешно скачан.' : 'The .drawio file with all layouts as tabs has been downloaded.') }}
             className={appStyles.exportBtn}
           >
             ↓ drawio
