@@ -8,6 +8,8 @@ import {
   useNodesState,
   useEdgesState,
   useNodesInitialized,
+  useReactFlow,
+  useUpdateNodeInternals,
   type Node,
   type Edge,
   type OnSelectionChangeParams,
@@ -50,26 +52,27 @@ import appStyles from './App.module.css'
 const NODE_TYPES = { table: TableNode }
 const EDGE_TYPES = { fk: OrthoEdge }
 
-function NodesInitializedFitView({ rfRef, onNodesInitialized }: {
+function NodesInitializedFitView({ rfRef }: {
   rfRef: React.RefObject<ReactFlowInstance<any, any> | null>
-  onNodesInitialized?: () => void
 }) {
   const initialized = useNodesInitialized()
+  const rf = useReactFlow()
+  const updateNodeInternals = useUpdateNodeInternals()
   const didFit = useRef(false)
   useEffect(() => {
+    if (!initialized) return
     // fit once per mount (fresh schema open); never on later node re-inits (edits)
-    if (initialized && !didFit.current) {
+    if (!didFit.current) {
       didFit.current = true
       rfRef.current?.fitView({ padding: 0.2, duration: 300 })
     }
-    // nodes just became known to React Flow's internal store — nudge edges to
-    // recompute their paths against it. Without this, edges whose nodes are
-    // brand new (a whole schema swapped in, not an incremental edit) can be
-    // set in the same tick React Flow registers the nodes and never get their
-    // source/target resolved, rendering as invisible until something else
-    // (e.g. a reload) forces a recompute.
-    if (initialized) onNodesInitialized?.()
-  }, [initialized, rfRef, onNodesInitialized])
+    // Re-register every node's handles once nodes are measured. On a fast
+    // schema swap (exit → open), edges can be committed before React Flow has
+    // registered the brand-new nodes' handles, leaving their source/target
+    // unresolved so no <path> is drawn — until a manual reopen. Forcing a
+    // handle recompute here resolves them without the reopen.
+    updateNodeInternals(rf.getNodes().map(n => n.id))
+  }, [initialized, rfRef, rf, updateNodeInternals])
   return null
 }
 
@@ -256,9 +259,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-  // force React Flow to recompute every edge's path against the now-known
-  // node set once nodes finish initializing (see NodesInitializedFitView)
-  const nudgeEdges = useCallback(() => setEdges(es => [...es]), [setEdges])
   const nodesRef = useRef<Node[]>([])
   useEffect(() => { nodesRef.current = nodes }, [nodes])
   useEffect(() => { currentSaveIdRef.current = currentSaveId }, [currentSaveId])
@@ -1257,7 +1257,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
                       panOnScroll={true}
                       onInit={instance => { rfInstanceRef.current = instance }}
                     >
-                      <NodesInitializedFitView rfRef={rfInstanceRef} onNodesInitialized={nudgeEdges} />
+                      <NodesInitializedFitView rfRef={rfInstanceRef} />
                       <Background color={theme === 'dark' ? '#1a1d27' : '#dde0e6'} gap={20} />
                       <Controls
                         showInteractive={false}
