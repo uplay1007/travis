@@ -50,7 +50,10 @@ import appStyles from './App.module.css'
 const NODE_TYPES = { table: TableNode }
 const EDGE_TYPES = { fk: OrthoEdge }
 
-function NodesInitializedFitView({ rfRef }: { rfRef: React.RefObject<ReactFlowInstance<any, any> | null> }) {
+function NodesInitializedFitView({ rfRef, onNodesInitialized }: {
+  rfRef: React.RefObject<ReactFlowInstance<any, any> | null>
+  onNodesInitialized?: () => void
+}) {
   const initialized = useNodesInitialized()
   const didFit = useRef(false)
   useEffect(() => {
@@ -59,7 +62,14 @@ function NodesInitializedFitView({ rfRef }: { rfRef: React.RefObject<ReactFlowIn
       didFit.current = true
       rfRef.current?.fitView({ padding: 0.2, duration: 300 })
     }
-  }, [initialized, rfRef])
+    // nodes just became known to React Flow's internal store — nudge edges to
+    // recompute their paths against it. Without this, edges whose nodes are
+    // brand new (a whole schema swapped in, not an incremental edit) can be
+    // set in the same tick React Flow registers the nodes and never get their
+    // source/target resolved, rendering as invisible until something else
+    // (e.g. a reload) forces a recompute.
+    if (initialized) onNodesInitialized?.()
+  }, [initialized, rfRef, onNodesInitialized])
   return null
 }
 
@@ -246,6 +256,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  // force React Flow to recompute every edge's path against the now-known
+  // node set once nodes finish initializing (see NodesInitializedFitView)
+  const nudgeEdges = useCallback(() => setEdges(es => [...es]), [setEdges])
   const nodesRef = useRef<Node[]>([])
   useEffect(() => { nodesRef.current = nodes }, [nodes])
   useEffect(() => { currentSaveIdRef.current = currentSaveId }, [currentSaveId])
@@ -1235,7 +1248,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
                       panOnScroll={true}
                       onInit={instance => { rfInstanceRef.current = instance }}
                     >
-                      <NodesInitializedFitView rfRef={rfInstanceRef} />
+                      <NodesInitializedFitView rfRef={rfInstanceRef} onNodesInitialized={nudgeEdges} />
                       <Background color={theme === 'dark' ? '#1a1d27' : '#dde0e6'} gap={20} />
                       <Controls
                         showInteractive={false}
