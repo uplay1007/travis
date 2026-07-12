@@ -8,8 +8,6 @@ export interface CurrentSession {
   v: number
   schema: Schema
   positions: Record<string, { x: number; y: number }>
-  saveId?: string
-  saveName?: string
   activeLayoutId?: string | null   // layout the user was viewing, restored on reload
 }
 

@@ -42,11 +42,8 @@ import { schemaToStructured } from './utils/structuredJSON'
 import { exportDrawio, type DrawioPage } from './utils/drawioExport'
 import { T, type Lang } from './i18n'
 import { DialogProvider, useDialog } from './contexts/DialogContext'
-import { useAuth } from './contexts/AuthContext'
-import { AuthScreen } from './components/auth/AuthScreen'
 import { Logo } from './components/ui/Logo'
 import { ThemeSwitch } from './components/ui/ThemeSwitch'
-import { upsertSave } from './services/schemasAPI'
 import appStyles from './App.module.css'
 
 const NODE_TYPES = { table: TableNode }
@@ -239,16 +236,6 @@ export default function App() {
   }, [theme])
   const toggleTheme = useCallback(() => setTheme(t => (t === 'dark' ? 'light' : 'dark')), [])
 
-  const { user, loading } = useAuth()
-
-  if (loading) return (
-    <div className={appStyles.loadingScreen}>
-      <span className={appStyles.loadingText}>Loading...</span>
-    </div>
-  )
-
-  if (!user) return <AuthScreen />
-
   return (
     <DialogProvider lang={lang}>
       <AppContent lang={lang} setLang={setLang} theme={theme} onThemeToggle={toggleTheme} />
@@ -266,16 +253,12 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   const dialog = useDialog()
 
   const [schema, setSchema] = useState<Schema | null>(session?.schema ?? null)
-  const [currentSaveId, setCurrentSaveId] = useState<string | undefined>(session?.saveId)
-  const currentSaveIdRef = useRef<string | undefined>(session?.saveId)
-  const currentSaveName = useRef<string | null>(session?.saveName ?? null)
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null)
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const nodesRef = useRef<Node[]>([])
   useEffect(() => { nodesRef.current = nodes }, [nodes])
-  useEffect(() => { currentSaveIdRef.current = currentSaveId }, [currentSaveId])
 
   const masterPositionsRef = useRef<Record<string, { x: number; y: number }>>(session?.positions ?? {})
 
@@ -570,7 +553,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       const schemaOut = schema.layouts?.length
         ? { ...schema, layouts: schema.layouts.map(l => ({ ...l, positions: layoutPosRef.current[l.id] ?? l.positions })) }
         : schema
-      saveCurrentSession({ schema: schemaOut, positions: masterPositionsRef.current, saveId: currentSaveIdRef.current, saveName: currentSaveName.current ?? undefined, activeLayoutId: activeLayoutIdRef.current })
+      saveCurrentSession({ schema: schemaOut, positions: masterPositionsRef.current, activeLayoutId: activeLayoutIdRef.current })
       // re-frame the camera on the freshly arranged tables
       setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
     } catch (err) {
@@ -826,7 +809,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       (schemaToUse.layouts ?? []).map(l => [l.id, layoutPosRef.current[l.id] ?? { ...l.positions }])
     )
     setSchema(schemaToUse)
-    saveCurrentSession({ schema: schemaToUse, positions: masterPositionsRef.current, saveId: currentSaveIdRef.current, saveName: currentSaveName.current ?? undefined, activeLayoutId: activeLayoutIdRef.current })
+    saveCurrentSession({ schema: schemaToUse, positions: masterPositionsRef.current, activeLayoutId: activeLayoutIdRef.current })
     const { nodes: n, edges: e } = schemaToFlow(schemaToUse, handleEdit, masterPositionsRef.current, currentNodes)
     setNodes(n)
     setEdges(e)
@@ -862,7 +845,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // past the drag-debounced autosave below and revert to a stale snapshot
   const persistSessionNow = useCallback(() => {
     if (!schema) return
-    saveCurrentSession({ schema: serializeSchema(schema), positions: masterPositionsRef.current, saveId: currentSaveIdRef.current, saveName: currentSaveName.current ?? undefined, activeLayoutId: activeLayoutIdRef.current })
+    saveCurrentSession({ schema: serializeSchema(schema), positions: masterPositionsRef.current, activeLayoutId: activeLayoutIdRef.current })
   }, [schema, serializeSchema])
 
   useEffect(() => {
@@ -871,9 +854,10 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     return () => clearTimeout(handle)
   }, [nodes, schema, persistSessionNow])
 
+  // Save = write back to the open file handle if there is one; otherwise
+  // download a fresh copy (there's no cloud to persist to — local only).
   const handleSave = useCallback(async () => {
     if (!schema) return
-    const posMap = { ...masterPositionsRef.current }
     const schemaOut = serializeSchema(schema)
 
     if (fileHandle) {
@@ -901,33 +885,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
         )
         return
       }
-    }
-
-    try {
-      if (currentSaveId && currentSaveName.current) {
-        await upsertSave(currentSaveName.current, schemaOut, posMap, currentSaveId)
-      } else {
-        const fileDefault = fileHandle?.name.replace(/\.[^.]+$/, '')
-        const defaultName = fileDefault ?? schema.tables.map(tb => tb.name).slice(0, 2).join(', ') + (schema.tables.length > 2 ? '…' : '')
-        const name = await dialog.prompt(lang === 'ru' ? 'Название сохранения' : 'Save name', t.saveNamePrompt, defaultName)
-        if (!name) return
-        const saved = await upsertSave(name, schemaOut, posMap)
-        setCurrentSaveId(saved.id)
-        currentSaveIdRef.current = saved.id
-        currentSaveName.current = name
-      }
-    } catch (e) {
-      dialog.alert(
-        lang === 'ru' ? 'Ошибка сохранения' : 'Save failed',
-        (e as Error).message
-      )
-      return
+    } else {
+      exportJSON(schemaOut)
     }
 
     setSaveFlash(true)
     setTimeout(() => setSaveFlash(false), 1500)
     dialog.alert(lang === 'ru' ? 'Сохранение' : 'Saved', lang === 'ru' ? 'Изменения успешно сохранены!' : 'All changes have been successfully saved.')
-  }, [schema, currentSaveId, fileHandle, t, dialog, lang, serializeSchema])
+  }, [schema, fileHandle, dialog, lang, serializeSchema])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -939,9 +904,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   }, [handleSave, clearHighlight])
 
   const handleExit = useCallback(() => {
-    clearCurrentSession(); setSchema(null); setCurrentSaveId(undefined)
-    currentSaveIdRef.current = undefined
-    currentSaveName.current = null
+    clearCurrentSession(); setSchema(null)
     setFileHandle(null); setTagFilter(null); setActiveLayoutId(null); setEditorState(null)
   }, [])
 
@@ -995,9 +958,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
 
   const handleOpen = useCallback((result: OpenResult) => {
     setHighlightTable(null); setSelectedTables(new Set()); setTagFilter(null); setActiveLayoutId(null)
-    setCurrentSaveId(result.savedId)
-    currentSaveIdRef.current = result.savedId
-    currentSaveName.current = result.savedName ?? null
     setFileHandle(result.fileHandle ?? null)
     applySchema(result.schema, undefined, result.positions)
     const hasPositions = result.positions && Object.keys(result.positions).length > 0
@@ -1005,7 +965,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   }, [applySchema])
 
   if (!schema) {
-    return <UploadZone lang={lang} theme={theme} onThemeToggle={onThemeToggle} onOpen={handleOpen} />
+    return <UploadZone theme={theme} onThemeToggle={onThemeToggle} onOpen={handleOpen} />
   }
 
   return (

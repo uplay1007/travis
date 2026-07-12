@@ -34,39 +34,24 @@
   gap: 12px;
 }
 
-.navEmail {
-  color: #4b5563;
-  font-size: 13px;
-}
-
-.signOutBtn {
-  font-size: 13px;
-  font-weight: 600;
-  padding: 6px 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(var(--overlay-rgb), 0.1);
-  color: #6b7280;
-  background: transparent;
-  cursor: pointer;
-}
-
 /* ── Body ─────────────────────────────────────────────────────────── */
 
 .body {
   display: flex;
   flex: 1;
-  gap: 48px;
   padding: 48px;
   max-width: 1400px;
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
+  justify-content: center;
 }
 
 /* ── Left column ──────────────────────────────────────────────────── */
 
 .leftCol {
-  flex: 1;
+  width: 100%;
+  max-width: 640px;
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -219,141 +204,3 @@
   padding: 0;
 }
 
-/* ── Right column (saves) ─────────────────────────────────────────── */
-
-.rightCol {
-  width: 380px;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  flex-shrink: 0;
-}
-
-.savesLoading {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.savesLoadingText {
-  color: #4b5563;
-  font-size: 14px;
-}
-
-.savesEmpty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  border: 2px dashed rgba(var(--overlay-rgb), 0.07);
-  border-radius: 20px;
-  padding: 60px;
-  gap: 14px;
-}
-
-.savesEmptyIcon {
-  font-size: 52px;
-}
-
-.savesEmptyText {
-  color: #4b5563;
-  font-size: 15px;
-  text-align: center;
-}
-
-.savesList {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  overflow-y: auto;
-}
-
-.saveCard {
-  border-radius: 18px;
-  border: 1px solid rgba(var(--overlay-rgb), 0.1);
-  padding: 18px 20px;
-  background: rgba(var(--overlay-rgb), 0.03);
-}
-
-.saveCardTop {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.saveCardName {
-  color: var(--text-on-surface);
-  font-weight: 700;
-  font-size: 17px;
-  flex: 1;
-}
-
-.saveDeleteBtn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: #4b5563;
-  margin-left: 8px;
-  padding: 0;
-  border-radius: 6px;
-  font-size: 17px;
-  transition: all 0.2s;
-}
-
-.saveDeleteBtnConfirm {
-  font-size: 12px;
-  background: #ef4444;
-  color: white;
-  padding: 4px 8px;
-  font-weight: 700;
-}
-
-.saveTableTags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 14px;
-}
-
-.saveTableTag {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 8px;
-  /* background and color set via inline CSS vars */
-  background: var(--tag-bg, rgba(99, 102, 241, 0.13));
-  color: var(--tag-color, #6366f1);
-}
-
-.saveTableTagExtra {
-  font-size: 11px;
-  padding: 3px 9px;
-  border-radius: 8px;
-  background: rgba(var(--overlay-rgb), 0.06);
-  color: #6b7280;
-}
-
-.saveCardBottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.saveDate {
-  color: #4b5563;
-  font-size: 12px;
-}
-
-.openBtn {
-  font-size: 14px;
-  font-weight: 700;
-  padding: 8px 20px;
-  border-radius: 10px;
-  background: #6366f1;
-  color: white;
-  border: none;
-  cursor: pointer;
-}

@@ -32,7 +32,7 @@ database, onboarding onto a legacy one, or arguing about a model with your team.
 - **🎯 Focused views** — `Shift`-click to hand-pick tables, `⌥`-click to grab a table and its private satellites, then save them as named **layouts** — each with its own positions *and* detail level.
 - **✏️ Edit live** — a visual table editor **and** a two-pane DSL editor that validates as you type: bad types, broken relations, or Cyrillic names underline the culprit and freeze the canvas until you fix it.
 - **🏷️ Table roles** — tag a table's architectural role (reference, master, transactional, link, dimension, fact) for a quick read on how a schema is shaped.
-- **☁️ Cloud saves** — schemas (layouts and all) sync across devices behind auth + row-level security.
+- **💾 Local-first** — no login, no server. Your schema lives in the browser and on disk; nothing leaves your machine.
 - **↔️ Round-trip export** — write back to SQL DDL or a clean, structured JSON.
 - **📐 draw.io export** — export the whole schema at once, one switchable page per layout (plus "All tables"), as native draw.io table shapes ready to drop into docs or wikis.
 
@@ -63,7 +63,7 @@ Then drop in a schema file — or paste one straight into the box.
 
 [React 18](https://react.dev/) · [React Flow](https://reactflow.dev/) (canvas) ·
 [ELK.js](https://github.com/kieler/elkjs) (layout) · [CodeMirror](https://codemirror.net/) (DSL editor) ·
-[Supabase](https://supabase.com/) (auth + saves) · [Vite](https://vitejs.dev/)
+[Vite](https://vitejs.dev/)
 
 ---
 
