@@ -115,30 +115,16 @@
 .exitBtn {
   font-size: 14px;
   color: #6b7280;
-  background: none;
-  border: none;
-  cursor: pointer;
-  margin-left: 8px;
-  transition: color 0.15s;
-}
-
-.exitBtn:hover {
-  color: var(--text-on-surface);
-}
-
-.langToggleBtn {
-  font-size: 14px;
-  font-weight: 700;
-  color: #6b7280;
   padding: 7px 14px;
   border: 1px solid rgba(var(--overlay-rgb), 0.1);
   border-radius: 8px;
   background: none;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
-.langToggleBtn:hover {
+.exitBtn:hover {
+  color: var(--text-on-surface);
   background: rgba(var(--overlay-rgb), 0.1);
 }
 
@@ -211,10 +197,6 @@
 /* ── Canvas toolbar ───────────────────────────────────────────────── */
 
 .canvasToolbar {
-  position: absolute;
-  top: 24px;
-  left: 24px;
-  z-index: 10;
   display: flex;
   align-items: center;
   gap: 12px;

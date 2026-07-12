@@ -1017,6 +1017,151 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
           <span className={appStyles.topbarLogo}>TraVis</span>
           <div className={appStyles.topbarBadge}>{schema.tables.length} tables</div>
         </div>
+
+        {/* Canvas toolbar — pan/select, groups, view mode, layouts, organize, JSON split */}
+        <div className={appStyles.canvasToolbar}>
+          {/* Pan / Select */}
+          <div className={appStyles.toolPill}>
+            {(['pan', 'select'] as const).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setCanvasMode(mode)}
+                className={`${appStyles.toolBtn} ${canvasMode === mode ? appStyles.toolBtnActive : ''}`}
+                title={mode === 'pan' ? (lang === 'ru' ? 'Режим перемещения' : 'Pan mode') : (lang === 'ru' ? 'Режим выделения (лассо)' : 'Select mode (lasso)')}
+              >
+                <span className={appStyles.toolBtnIcon}>{mode === 'pan' ? '✋' : '⬚'}</span>
+                <span className={appStyles.toolBtnLabel}>{mode}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Groups */}
+          <div className={appStyles.groupsPill} ref={groupsBtnRef}>
+            <button
+              onClick={() => setGroupsOpen(!groupsOpen)}
+              className={`${appStyles.groupsBtn} ${tagFilter ? appStyles.groupsBtnFiltered : ''}`}
+            >
+              <span className={appStyles.toolBtnIcon}>◎</span>
+              <span className={appStyles.toolBtnLabel}>
+                {tagFilter ? `#${tagFilter}` : (lang === 'ru' ? 'Группы' : 'Groups')}
+              </span>
+              <span className={appStyles.groupsChevron}>▼</span>
+            </button>
+            {groupsOpen && (
+              <div className={appStyles.groupsDropdown}>
+                <button
+                  onClick={() => selectTagGroup(null)}
+                  className={`${appStyles.groupsAllBtn} ${tagFilter === null ? appStyles.groupsAllBtnActive : ''}`}
+                >
+                  <span>{lang === 'ru' ? 'Все таблицы' : 'All groups'}</span>
+                  {tagFilter === null && <span>✓</span>}
+                </button>
+                <div className={appStyles.groupsDivider} />
+                {allTags.map(({ tag, count }) => (
+                  <button
+                    key={tag}
+                    onClick={() => selectTagGroup(tag)}
+                    className={`${appStyles.groupsTagBtn} ${tagFilter === tag ? appStyles.groupsTagBtnActive : ''}`}
+                  >
+                    <div className={appStyles.groupsTagLeft}>
+                      <span className={appStyles.groupsTagDot} />
+                      <span>{tag}</span>
+                    </div>
+                    <span className={appStyles.groupsTagCount}>{count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* View mode */}
+          <div className={appStyles.toolPill}>
+            <select
+              value={viewMode}
+              onChange={e => handleViewMode(e.target.value as ViewMode)}
+              className={appStyles.viewSelect}
+            >
+              <option value="full">Full</option>
+              <option value="compact">Compact</option>
+              <option value="collapsed">Collapsed</option>
+            </select>
+          </div>
+
+          {/* Layouts */}
+          <div className={appStyles.groupsPill} ref={layoutsBtnRef}>
+            <button
+              onClick={() => setLayoutsOpen(o => !o)}
+              className={`${appStyles.groupsBtn} ${activeLayout ? appStyles.groupsBtnFiltered : ''}`}
+            >
+              <span className={appStyles.toolBtnIcon}>▦</span>
+              <span className={appStyles.toolBtnLabel}>
+                {activeLayout ? activeLayout.name : (lang === 'ru' ? 'Слои' : 'Layouts')}
+              </span>
+              <span className={appStyles.groupsChevron}>▼</span>
+            </button>
+            {layoutsOpen && (
+              <div className={appStyles.groupsDropdown}>
+                <button
+                  onClick={() => selectLayout(null)}
+                  className={`${appStyles.groupsAllBtn} ${activeLayoutId === null ? appStyles.groupsAllBtnActive : ''}`}
+                >
+                  <span>{lang === 'ru' ? 'Все таблицы' : 'All tables'}</span>
+                  {activeLayoutId === null && <span>✓</span>}
+                </button>
+                <div className={appStyles.groupsDivider} />
+                {(schema.layouts ?? []).length === 0 && (
+                  <div className={appStyles.layoutEmpty}>
+                    {lang === 'ru' ? 'Пока нет слоёв' : 'No layouts yet'}
+                  </div>
+                )}
+                {(schema.layouts ?? []).map(l => (
+                  <div key={l.id} className={appStyles.layoutRow}>
+                    <button
+                      onClick={() => selectLayout(l.id)}
+                      className={`${appStyles.groupsTagBtn} ${activeLayoutId === l.id ? appStyles.groupsTagBtnActive : ''}`}
+                    >
+                      <div className={appStyles.groupsTagLeft}>
+                        <span>{l.name}</span>
+                      </div>
+                      <span className={appStyles.groupsTagCount}>{l.tables.length}</span>
+                    </button>
+                    <button
+                      className={appStyles.layoutMenuBtn}
+                      onClick={e => { e.stopPropagation(); setLayoutsOpen(false); setLayoutSettingsId(l.id) }}
+                      title={lang === 'ru' ? 'Настройки слоя' : 'Layout settings'}
+                    >⋯</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Organize (ELK) */}
+          <div className={appStyles.toolPill}>
+            <button
+              onClick={handleLayout}
+              disabled={layouting}
+              className={`${appStyles.toolBtn} ${layouting ? appStyles.toolBtnDisabled : ''}`}
+              title="Auto-arrange tables (ELK)"
+            >
+              <span className={appStyles.toolBtnIcon} style={layouting ? { display: 'inline-block', transform: 'rotate(90deg)' } : undefined}>⟳</span>
+              <span className={appStyles.toolBtnLabel}>{layouting ? '...' : 'Organize'}</span>
+            </button>
+          </div>
+
+          {/* JSON split view */}
+          <div className={appStyles.toolPill}>
+            <button
+              onClick={() => { setSplitView(v => !v); setSchemaValid(true) }}
+              className={`${appStyles.toolBtn} ${splitView ? appStyles.toolBtnActive : ''}`}
+              title="Toggle JSON editor"
+            >
+              <span style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 700 }}>{'{}'}</span>
+              <span className={appStyles.toolBtnLabel}>JSON</span>
+            </button>
+          </div>
+        </div>
+
         <div className={appStyles.topbarRight}>
           <button
             onClick={() => { exportJSON(serializeSchema(schema)); dialog.alert(lang === 'ru' ? 'Экспорт JSON' : 'JSON Export', lang === 'ru' ? 'Файл схемы успешно скачан.' : 'The schema file has been successfully downloaded.') }}
@@ -1037,6 +1182,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
             ↓ drawio
           </button>
           <div className={appStyles.divider} />
+          <ThemeSwitch theme={theme} onToggle={onThemeToggle} />
+          <div className={appStyles.divider} />
           <button
             onClick={handleSave}
             className={appStyles.saveBtn}
@@ -1045,13 +1192,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
             {t.saveBtn}
           </button>
           <button onClick={handleExit} className={appStyles.exitBtn}>{t.exitBtn}</button>
-          <button
-            onClick={() => setLang(l => l === 'en' ? 'ru' : 'en')}
-            className={appStyles.langToggleBtn}
-          >
-            {lang === 'en' ? 'RU' : 'EN'}
-          </button>
-          <ThemeSwitch theme={theme} onToggle={onThemeToggle} />
         </div>
       </div>
 
@@ -1077,150 +1217,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
               />
             )}
             <div className={appStyles.canvasArea}>
-              {/* Canvas toolbar */}
-              <div className={appStyles.canvasToolbar}>
-                {/* Pan / Select */}
-                <div className={appStyles.toolPill}>
-                  {(['pan', 'select'] as const).map(mode => (
-                    <button
-                      key={mode}
-                      onClick={() => setCanvasMode(mode)}
-                      className={`${appStyles.toolBtn} ${canvasMode === mode ? appStyles.toolBtnActive : ''}`}
-                      title={mode === 'pan' ? (lang === 'ru' ? 'Режим перемещения' : 'Pan mode') : (lang === 'ru' ? 'Режим выделения (лассо)' : 'Select mode (lasso)')}
-                    >
-                      <span className={appStyles.toolBtnIcon}>{mode === 'pan' ? '✋' : '⬚'}</span>
-                      <span className={appStyles.toolBtnLabel}>{mode}</span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Groups */}
-                <div className={appStyles.groupsPill} ref={groupsBtnRef}>
-                  <button
-                    onClick={() => setGroupsOpen(!groupsOpen)}
-                    className={`${appStyles.groupsBtn} ${tagFilter ? appStyles.groupsBtnFiltered : ''}`}
-                  >
-                    <span className={appStyles.toolBtnIcon}>◎</span>
-                    <span className={appStyles.toolBtnLabel}>
-                      {tagFilter ? `#${tagFilter}` : (lang === 'ru' ? 'Группы' : 'Groups')}
-                    </span>
-                    <span className={appStyles.groupsChevron}>▼</span>
-                  </button>
-                  {groupsOpen && (
-                    <div className={appStyles.groupsDropdown}>
-                      <button
-                        onClick={() => selectTagGroup(null)}
-                        className={`${appStyles.groupsAllBtn} ${tagFilter === null ? appStyles.groupsAllBtnActive : ''}`}
-                      >
-                        <span>{lang === 'ru' ? 'Все таблицы' : 'All groups'}</span>
-                        {tagFilter === null && <span>✓</span>}
-                      </button>
-                      <div className={appStyles.groupsDivider} />
-                      {allTags.map(({ tag, count }) => (
-                        <button
-                          key={tag}
-                          onClick={() => selectTagGroup(tag)}
-                          className={`${appStyles.groupsTagBtn} ${tagFilter === tag ? appStyles.groupsTagBtnActive : ''}`}
-                        >
-                          <div className={appStyles.groupsTagLeft}>
-                            <span className={appStyles.groupsTagDot} />
-                            <span>{tag}</span>
-                          </div>
-                          <span className={appStyles.groupsTagCount}>{count}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* View mode */}
-                <div className={appStyles.toolPill}>
-                  <select
-                    value={viewMode}
-                    onChange={e => handleViewMode(e.target.value as ViewMode)}
-                    className={appStyles.viewSelect}
-                  >
-                    <option value="full">Full</option>
-                    <option value="compact">Compact</option>
-                    <option value="collapsed">Collapsed</option>
-                  </select>
-                </div>
-
-                {/* Layouts */}
-                <div className={appStyles.groupsPill} ref={layoutsBtnRef}>
-                  <button
-                    onClick={() => setLayoutsOpen(o => !o)}
-                    className={`${appStyles.groupsBtn} ${activeLayout ? appStyles.groupsBtnFiltered : ''}`}
-                  >
-                    <span className={appStyles.toolBtnIcon}>▦</span>
-                    <span className={appStyles.toolBtnLabel}>
-                      {activeLayout ? activeLayout.name : (lang === 'ru' ? 'Слои' : 'Layouts')}
-                    </span>
-                    <span className={appStyles.groupsChevron}>▼</span>
-                  </button>
-                  {layoutsOpen && (
-                    <div className={appStyles.groupsDropdown}>
-                      <button
-                        onClick={() => selectLayout(null)}
-                        className={`${appStyles.groupsAllBtn} ${activeLayoutId === null ? appStyles.groupsAllBtnActive : ''}`}
-                      >
-                        <span>{lang === 'ru' ? 'Все таблицы' : 'All tables'}</span>
-                        {activeLayoutId === null && <span>✓</span>}
-                      </button>
-                      <div className={appStyles.groupsDivider} />
-                      {(schema.layouts ?? []).length === 0 && (
-                        <div className={appStyles.layoutEmpty}>
-                          {lang === 'ru' ? 'Пока нет слоёв' : 'No layouts yet'}
-                        </div>
-                      )}
-                      {(schema.layouts ?? []).map(l => (
-                        <div key={l.id} className={appStyles.layoutRow}>
-                          <button
-                            onClick={() => selectLayout(l.id)}
-                            className={`${appStyles.groupsTagBtn} ${activeLayoutId === l.id ? appStyles.groupsTagBtnActive : ''}`}
-                          >
-                            <div className={appStyles.groupsTagLeft}>
-                              <span>{l.name}</span>
-                            </div>
-                            <span className={appStyles.groupsTagCount}>{l.tables.length}</span>
-                          </button>
-                          <button
-                            className={appStyles.layoutMenuBtn}
-                            onClick={e => { e.stopPropagation(); setLayoutsOpen(false); setLayoutSettingsId(l.id) }}
-                            title={lang === 'ru' ? 'Настройки слоя' : 'Layout settings'}
-                          >⋯</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Organize (ELK) */}
-                <div className={appStyles.toolPill}>
-                  <button
-                    onClick={handleLayout}
-                    disabled={layouting}
-                    className={`${appStyles.toolBtn} ${layouting ? appStyles.toolBtnDisabled : ''}`}
-                    title="Auto-arrange tables (ELK)"
-                  >
-                    <span className={appStyles.toolBtnIcon} style={layouting ? { display: 'inline-block', transform: 'rotate(90deg)' } : undefined}>⟳</span>
-                    <span className={appStyles.toolBtnLabel}>{layouting ? '...' : 'Organize'}</span>
-                  </button>
-                </div>
-
-                {/* JSON split view */}
-                <div className={appStyles.toolPill}>
-                  <button
-                    onClick={() => { setSplitView(v => !v); setSchemaValid(true) }}
-                    className={`${appStyles.toolBtn} ${splitView ? appStyles.toolBtnActive : ''}`}
-                    title="Toggle JSON editor"
-                  >
-                    <span style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 700 }}>{'{}'}</span>
-                    <span className={appStyles.toolBtnLabel}>JSON</span>
-                  </button>
-                </div>
-              </div>
-
               {/* Create-layout button — appears when a table (or group) is selected */}
               {highlightCtxValue.highlighted.size > 0 && !activeLayout && (
                 <button className={appStyles.createLayoutFab} onClick={createLayoutFromSelection}>

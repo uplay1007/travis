@@ -5,7 +5,6 @@
 
 .switch {
   --h: 37px;
-  --track-dark: #2b2f3a;
   --track-light: #d8dbe0;
   --knob: #14161f;
   --crescent: #e5e7eb;
@@ -27,7 +26,7 @@
   position: absolute;
   inset: 0;
   border-radius: calc(var(--h) / 2);
-  background-color: var(--track-dark);
+  background-color: transparent;
   border: 1px solid rgba(var(--overlay-rgb), 0.18);
   cursor: pointer;
 }
