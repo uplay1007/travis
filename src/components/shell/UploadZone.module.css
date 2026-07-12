@@ -50,17 +50,6 @@
   cursor: pointer;
 }
 
-.langBtn {
-  font-size: 14px;
-  font-weight: 600;
-  padding: 7px 16px;
-  border-radius: 10px;
-  border: 1px solid rgba(var(--overlay-rgb), 0.15);
-  color: var(--text-muted);
-  background: transparent;
-  cursor: pointer;
-}
-
 /* ── Body ─────────────────────────────────────────────────────────── */
 
 .body {

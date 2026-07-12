@@ -21,7 +21,6 @@ export interface OpenResult {
 
 interface Props {
   lang: Lang
-  onLangToggle: () => void
   theme: 'dark' | 'light'
   onThemeToggle: () => void
   onOpen: (result: OpenResult) => void
@@ -42,7 +41,7 @@ function fmtDate(iso: string, lang: Lang) {
   })
 }
 
-export function UploadZone({ lang, onLangToggle, theme, onThemeToggle, onOpen }: Props) {
+export function UploadZone({ lang, theme, onThemeToggle, onOpen }: Props) {
   const t = T[lang]
   const dialog = useDialog()
   const { signOut, user } = useAuth()
@@ -143,9 +142,6 @@ export function UploadZone({ lang, onLangToggle, theme, onThemeToggle, onOpen }:
         <div className={styles.navRight}>
           <span className={styles.navEmail}>{user?.email}</span>
           <button onClick={signOut} className={styles.signOutBtn}>Sign out</button>
-          <button onClick={onLangToggle} className={styles.langBtn}>
-            {lang === 'en' ? 'RU' : 'EN'}
-          </button>
           <ThemeSwitch theme={theme} onToggle={onThemeToggle} />
         </div>
       </div>

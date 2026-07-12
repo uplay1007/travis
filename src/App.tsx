@@ -1005,7 +1005,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   }, [applySchema])
 
   if (!schema) {
-    return <UploadZone lang={lang} onLangToggle={() => setLang(l => l === 'en' ? 'ru' : 'en')} theme={theme} onThemeToggle={onThemeToggle} onOpen={handleOpen} />
+    return <UploadZone lang={lang} theme={theme} onThemeToggle={onThemeToggle} onOpen={handleOpen} />
   }
 
   return (
