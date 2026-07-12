@@ -10,6 +10,8 @@
 /* ── Top bar ──────────────────────────────────────────────────────── */
 
 .topbar {
+  position: relative;
+  z-index: 20;
   height: 58px;
   background: var(--bg-panel);
   border-bottom: 1px solid rgba(var(--overlay-rgb), 0.08);
@@ -163,7 +165,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 96px;
+  padding-top: 40px;
   cursor: not-allowed;
 }
 
@@ -340,7 +342,7 @@
 
 .createLayoutFab {
   position: absolute;
-  top: 84px;
+  top: 24px;
   left: 24px;
   z-index: 10;
   display: flex;
@@ -374,7 +376,7 @@
 
 .addToLayoutWrap {
   position: absolute;
-  top: 140px;
+  top: 80px;
   left: 24px;
   z-index: 10;
 }
