@@ -146,11 +146,14 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
     >
       <div className={styles.header} onClick={handleHeaderClick} onMouseDown={handleHeaderMouseDown}>
         <span className={styles.headerName}>{table.name}</span>
-        {table.type && <span className={styles.typeBadge}>{TYPE_LABEL[table.type]}</span>}
         <div className={styles.headerRight}>
-          <span className={styles.colCount}>
-            {visibleCount}{viewMode === 'compact' ? `/${table.columns.length}` : ''} cols
-          </span>
+          {table.type ? (
+            <span className={styles.typeBadge}>{TYPE_LABEL[table.type]}</span>
+          ) : (
+            <span className={styles.colCount}>
+              {visibleCount}{viewMode === 'compact' ? `/${table.columns.length}` : ''} cols
+            </span>
+          )}
           <button
             className={styles.editBtn}
             onClick={e => { e.stopPropagation(); onEdit(table) }}
