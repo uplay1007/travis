@@ -54,3 +54,11 @@ html, body, #root {
   background: var(--bg-page);
   font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
 }
+
+/* React Flow overlays a draggable hitbox over the bounding box of a
+   marquee/multi-selection, which intercepts every click inside it —
+   you'd have to click empty canvas first to select a table individually
+   again. Make it purely visual so clicks always reach the node/pane below. */
+.react-flow__nodesselection-rect {
+  pointer-events: none;
+}
