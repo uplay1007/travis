@@ -103,7 +103,7 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
     : edgeHover.target?.table === table.name ? edgeHover.target.column
     : null
 
-  const showColumns = isMultiSelected ? false : expanded
+  const showColumns = expanded
 
   // keep every column mounted so full↔compact can animate rows in/out;
   // in compact mode the non-key rows collapse instead of unmounting.
@@ -141,15 +141,13 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
           <span className={styles.colCount}>
             {visibleCount}{viewMode === 'compact' ? `/${table.columns.length}` : ''} cols
           </span>
-          {!isMultiSelected && (
-            <button
-              className={styles.editBtn}
-              onClick={e => { e.stopPropagation(); onEdit(table) }}
-              title="Edit table"
-            >
-              Edit
-            </button>
-          )}
+          <button
+            className={styles.editBtn}
+            onClick={e => { e.stopPropagation(); onEdit(table) }}
+            title="Edit table"
+          >
+            Edit
+          </button>
           <button
             className={styles.toggleBtn}
             onClick={e => { e.stopPropagation(); setExpanded(x => !x) }}
@@ -160,7 +158,7 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
         </div>
       </div>
 
-      {!isMultiSelected && table.tags && table.tags.length > 0 && (
+      {table.tags && table.tags.length > 0 && (
         <div className={styles.tags}>
           {table.tags.map(tag => (
             <span key={tag} className={styles.tag}>#{tag}</span>
