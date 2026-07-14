@@ -58,7 +58,9 @@ html, body, #root {
 /* React Flow overlays a draggable hitbox over the bounding box of a
    marquee/multi-selection, which intercepts every click inside it —
    you'd have to click empty canvas first to select a table individually
-   again. Make it purely visual so clicks always reach the node/pane below. */
-.react-flow__nodesselection-rect {
+   again. Make it purely visual so clicks always reach the node/pane below.
+   The descendant selector outweighs React Flow's own single-class rule
+   (which is imported after ours and would otherwise win the cascade). */
+.react-flow .react-flow__nodesselection-rect {
   pointer-events: none;
 }

@@ -398,22 +398,26 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     return edges.filter(e => visibleNames.has(e.source) && visibleNames.has(e.target))
   }, [edges, tagFilter, schema, activeLayout])
 
+  // React Flow's native selection (marquee, click, shift-click) is the single
+  // source of truth for the selected group. Mirror it into selectedTables so
+  // the highlight + "Create layout" follow it, and clear any lingering
+  // click-focus highlight so it can't coexist with a fresh marquee selection.
   const handleSelectionChange = useCallback(({ nodes: sel }: OnSelectionChangeParams) => {
-    setMultiSelectActive(sel.length > 1)
+    const ids = sel.map(n => n.id)
+    setMultiSelectActive(ids.length > 1)
+    setSelectedTables(new Set(ids))
+    setHighlightTable(null)
   }, [])
 
-  // React Flow keeps a node selected on a plain click so the whole group
-  // stays draggable from any member — so a click never drops a table out of
-  // a multi-selection on its own. Snapshot who's selected right before the
-  // click reaches React Flow (capture phase), then if the clicked table was
-  // already part of a multi-selection, unselect just that one.
-  const preClickSelectionRef = useRef<Set<string>>(new Set())
-  const captureSelectionSnapshot = useCallback(() => {
-    preClickSelectionRef.current = new Set(nodesRef.current.filter(n => n.selected).map(n => n.id))
-  }, [])
-  const handleNodeClick = useCallback((_e: React.MouseEvent, node: Node) => {
-    const before = preClickSelectionRef.current
-    if (before.size > 1 && before.has(node.id)) {
+  // A plain click on a table that's already part of a multi-selection drops
+  // just it out of the group. React Flow keeps a clicked member selected on
+  // its own (so the group stays draggable) and its mousedown handler is a
+  // no-op for an already-selected member — so nodesRef still holds the whole
+  // group here. Shift/Alt clicks are handled by React Flow / handleTableClick.
+  const handleNodeClick = useCallback((e: React.MouseEvent, node: Node) => {
+    if (e.shiftKey || e.altKey) return
+    const selected = nodesRef.current.filter(n => n.selected)
+    if (selected.length > 1 && selected.some(n => n.id === node.id)) {
       setNodes(nds => nds.map(n => n.id === node.id ? { ...n, selected: false } : n))
     }
   }, [setNodes])
@@ -495,38 +499,22 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     setSelectedTables(new Set())
   }, [])
 
-  // Click a table header. Shift builds a manual selection group (seeded from
-  // the current focus + its FK neighbors are dimmed); plain click focuses.
+  // Click a table header. Plain click and Shift+click go through React Flow's
+  // native selection (select-one / toggle), mirrored into selectedTables by
+  // handleSelectionChange; a plain click on a member is dropped by
+  // handleNodeClick. Only Alt/Option needs custom handling here: select the
+  // table + the tables connected ONLY to it (exclusive satellites), scoped to
+  // what's physically visible right now (active layout / tag filter / all).
   const handleTableClick = useCallback((name: string, mods: { shift: boolean; alt: boolean }) => {
-    // Alt/Option: select the table + tables connected ONLY to it (exclusive satellites),
-    // scoped to what's physically visible right now (active layout / tag filter / all)
-    if (mods.alt) {
-      if (!schema) return
-      const visibleTables = activeLayout
-        ? schema.tables.filter(t => activeLayout.tables.includes(t.name))
-        : tagFilter
-        ? schema.tables.filter(t => t.tags?.includes(tagFilter))
-        : schema.tables
-      setHighlightTable(name)
-      setSelectedTables(new Set([name, ...exclusiveNeighbors(visibleTables, name)]))
-      return
-    }
-    if (mods.shift) {
-      setSelectedTables(prev => {
-        // First shift-click seeds the selection with the whole lit set (focus +
-        // its FK-neighbors) so those neighbors stay put instead of collapsing.
-        const next = prev.size > 0
-          ? new Set(prev)
-          : (highlightTable && schema ? fkNeighborhood(schema.tables, highlightTable) : new Set<string>())
-        if (next.has(name)) next.delete(name)
-        else next.add(name)
-        return next
-      })
-    } else {
-      setSelectedTables(new Set())
-      setHighlightTable(prev => (prev === name ? null : name))
-    }
-  }, [highlightTable, schema, activeLayout, tagFilter])
+    if (!mods.alt || !schema) return
+    const visibleTables = activeLayout
+      ? schema.tables.filter(t => activeLayout.tables.includes(t.name))
+      : tagFilter
+      ? schema.tables.filter(t => t.tags?.includes(tagFilter))
+      : schema.tables
+    const ids = new Set([name, ...exclusiveNeighbors(visibleTables, name)])
+    setNodes(nds => nds.map(n => ({ ...n, selected: ids.has(n.id) })))
+  }, [schema, activeLayout, tagFilter, setNodes])
 
   const highlightCtxValue = useMemo((): HighlightCtxValue => {
     // manual selection mode takes precedence over neighbor highlight
@@ -1276,7 +1264,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
                       onNodeDragStop={handleNodeDragStop}
                       onSelectionChange={handleSelectionChange}
                       onNodeClick={handleNodeClick}
-                      onPointerDownCapture={captureSelectionSnapshot}
                       onPaneClick={clearHighlight}
                       nodeTypes={NODE_TYPES}
                       edgeTypes={EDGE_TYPES}
