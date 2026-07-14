@@ -518,9 +518,15 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       : tagFilter
       ? schema.tables.filter(t => t.tags?.includes(tagFilter))
       : schema.tables
-    const ids = new Set([name, ...exclusiveNeighbors(visibleTables, name)])
-    setNodes(nds => nds.map(n => ({ ...n, selected: ids.has(n.id) })))
-  }, [schema, activeLayout, tagFilter, setNodes])
+    // Set the group directly rather than through React Flow selection: with no
+    // exclusive satellites this is just the clicked table, and routing a
+    // single-node selection through handleSelectionChange would turn it into an
+    // FK-focus that lights up the table's neighbours — exactly what Alt should
+    // NOT do. selectedTables takes precedence in highlightCtxValue, so only the
+    // focus + its exclusive satellites light up.
+    setHighlightTable(name)
+    setSelectedTables(new Set([name, ...exclusiveNeighbors(visibleTables, name)]))
+  }, [schema, activeLayout, tagFilter])
 
   const highlightCtxValue = useMemo((): HighlightCtxValue => {
     // manual selection mode takes precedence over neighbor highlight

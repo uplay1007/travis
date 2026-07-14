@@ -118,7 +118,17 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
     : table.columns.length
 
   const handleHeaderClick = (e: React.MouseEvent) => {
+    // Alt+click builds its own exclusive-satellite selection in the app state;
+    // keep it out of React Flow's native selection (which would otherwise fire
+    // a single-node selection change and turn it into an FK-focus highlight).
+    if (e.altKey) e.stopPropagation()
     hl.onHighlight(table.name, { shift: e.shiftKey, alt: e.altKey })
+  }
+
+  // Also stop the Alt+mousedown so React Flow's drag/select handler never
+  // selects the node (it selects on pointer-down, before the click fires).
+  const handleHeaderMouseDown = (e: React.MouseEvent) => {
+    if (e.altKey) e.stopPropagation()
   }
 
   const nodeClass = [
@@ -134,7 +144,7 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
       className={nodeClass}
       style={{ '--accent': accent, '--accent-glow': `${accent}55`, '--accent-glow2': `${accent}44` } as React.CSSProperties}
     >
-      <div className={styles.header} onClick={handleHeaderClick}>
+      <div className={styles.header} onClick={handleHeaderClick} onMouseDown={handleHeaderMouseDown}>
         <span className={styles.headerName}>{table.name}</span>
         {table.type && <span className={styles.typeBadge}>{TYPE_LABEL[table.type]}</span>}
         <div className={styles.headerRight}>
