@@ -208,20 +208,26 @@ function schemaToFlow(
 
 type EditorState = null | 'new' | string
 
-function exportJSON(schema: Schema) {
+function withExt(name: string, ext: string): string {
+  const trimmed = name.trim()
+  if (!trimmed) return `schema.${ext}`
+  return trimmed.toLowerCase().endsWith(`.${ext}`) ? trimmed : `${trimmed}.${ext}`
+}
+
+function exportJSON(schema: Schema, filename = 'schema.json') {
   const blob = new Blob([JSON.stringify(schemaToStructured(schema), null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = url; a.download = 'schema.json'; a.click()
+  a.href = url; a.download = filename; a.click()
   URL.revokeObjectURL(url)
 }
 
-function downloadSQL(schema: Schema) {
+function downloadSQL(schema: Schema, filename = 'schema.sql') {
   const sql = exportSQL(schema)
   const blob = new Blob([sql], { type: 'text/plain' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = url; a.download = 'schema.sql'; a.click()
+  a.href = url; a.download = filename; a.click()
   URL.revokeObjectURL(url)
 }
 
@@ -268,7 +274,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   const rfInstanceRef = useRef<ReactFlowInstance<any, any> | null>(null)
   const groupsBtnRef = useRef<HTMLDivElement>(null)
 
-  const [canvasMode, setCanvasMode] = useState<'pan' | 'select'>('pan')
   const [viewMode, setViewMode] = useState<ViewMode>('full')
   const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [groupsOpen, setGroupsOpen] = useState(false)
@@ -772,7 +777,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // Export the whole schema to a draw.io file — one page per TraVis layout
   // plus an "All tables" page, switchable as tabs in draw.io (like sheets in
   // a spreadsheet), each keeping that view's own table set and positions.
-  const handleExportDrawio = useCallback(() => {
+  const handleExportDrawio = useCallback((filename = 'schema.drawio') => {
     if (!schema) return
     const schemaOut = serializeSchema(schema)
     const pages: DrawioPage[] = [
@@ -791,7 +796,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'schema.drawio'
+    a.download = filename
     a.click()
     URL.revokeObjectURL(url)
   }, [schema, serializeSchema, lang])
@@ -894,6 +899,16 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     dialog.alert(lang === 'ru' ? 'Сохранение' : 'Saved', lang === 'ru' ? 'Изменения успешно сохранены!' : 'All changes have been successfully saved.')
   }, [schema, fileHandle, dialog, lang, serializeSchema])
 
+  // asks for a filename before an export download; returns null if the user cancels
+  const promptFilename = useCallback(async (ext: string, defaultName: string) => {
+    const name = await dialog.prompt(
+      lang === 'ru' ? 'Имя файла' : 'Filename',
+      lang === 'ru' ? 'Введите имя файла для экспорта' : 'Enter a filename for the export',
+      defaultName
+    )
+    return name === null ? null : withExt(name, ext)
+  }, [dialog, lang])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); handleSave() }
@@ -978,22 +993,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
           <div className={appStyles.topbarBadge}>{schema.tables.length} tables</div>
         </div>
 
-        {/* Canvas toolbar — pan/select, groups, view mode, layouts, organize, JSON split */}
+        {/* Canvas toolbar — groups, view mode, layouts, organize, JSON split */}
         <div className={appStyles.canvasToolbar}>
-          {/* Pan / Select */}
-          <div className={appStyles.toolPill}>
-            {(['pan', 'select'] as const).map(mode => (
-              <button
-                key={mode}
-                onClick={() => setCanvasMode(mode)}
-                className={`${appStyles.toolBtn} ${canvasMode === mode ? appStyles.toolBtnActive : ''}`}
-                title={mode === 'pan' ? (lang === 'ru' ? 'Режим перемещения' : 'Pan mode') : (lang === 'ru' ? 'Режим выделения (лассо)' : 'Select mode (lasso)')}
-              >
-                <span className={appStyles.toolBtnIcon}>{mode === 'pan' ? '✋' : '⬚'}</span>
-                <span className={appStyles.toolBtnLabel}>{mode}</span>
-              </button>
-            ))}
-          </div>
 
           {/* Groups */}
           <div className={appStyles.groupsPill} ref={groupsBtnRef}>
@@ -1124,19 +1125,34 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
 
         <div className={appStyles.topbarRight}>
           <button
-            onClick={() => { exportJSON(serializeSchema(schema)); dialog.alert(lang === 'ru' ? 'Экспорт JSON' : 'JSON Export', lang === 'ru' ? 'Файл схемы успешно скачан.' : 'The schema file has been successfully downloaded.') }}
+            onClick={async () => {
+              const filename = await promptFilename('json', 'schema.json')
+              if (!filename) return
+              exportJSON(serializeSchema(schema), filename)
+              dialog.alert(lang === 'ru' ? 'Экспорт JSON' : 'JSON Export', lang === 'ru' ? 'Файл схемы успешно скачан.' : 'The schema file has been successfully downloaded.')
+            }}
             className={appStyles.exportBtn}
           >
             ↓ JSON
           </button>
           <button
-            onClick={() => { downloadSQL(schema); dialog.alert(lang === 'ru' ? 'Экспорт SQL' : 'SQL Export', lang === 'ru' ? 'SQL DDL файл успешно скачан.' : 'The SQL DDL file has been successfully downloaded.') }}
+            onClick={async () => {
+              const filename = await promptFilename('sql', 'schema.sql')
+              if (!filename) return
+              downloadSQL(schema, filename)
+              dialog.alert(lang === 'ru' ? 'Экспорт SQL' : 'SQL Export', lang === 'ru' ? 'SQL DDL файл успешно скачан.' : 'The SQL DDL file has been successfully downloaded.')
+            }}
             className={appStyles.exportBtn}
           >
             ↓ SQL
           </button>
           <button
-            onClick={() => { handleExportDrawio(); dialog.alert(lang === 'ru' ? 'Экспорт draw.io' : 'draw.io Export', lang === 'ru' ? 'Файл .drawio со всеми лэйаутами (вкладками) успешно скачан.' : 'The .drawio file with all layouts as tabs has been downloaded.') }}
+            onClick={async () => {
+              const filename = await promptFilename('drawio', 'schema.drawio')
+              if (!filename) return
+              handleExportDrawio(filename)
+              dialog.alert(lang === 'ru' ? 'Экспорт draw.io' : 'draw.io Export', lang === 'ru' ? 'Файл .drawio со всеми лэйаутами (вкладками) успешно скачан.' : 'The .drawio file with all layouts as tabs has been downloaded.')
+            }}
             className={appStyles.exportBtn}
           >
             ↓ drawio
@@ -1249,10 +1265,10 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
                       fitView
                       fitViewOptions={{ padding: 0.2 }}
                       minZoom={0.05}
-                      selectionMode={canvasMode === 'select' ? SelectionMode.Partial : SelectionMode.Full}
-                      panOnDrag={canvasMode === 'pan'}
-                      selectionOnDrag={canvasMode === 'select'}
-                      multiSelectionKeyCode={canvasMode === 'select' ? 'Shift' : null}
+                      selectionMode={SelectionMode.Partial}
+                      panOnDrag={[2]}
+                      selectionOnDrag
+                      multiSelectionKeyCode="Shift"
                       panOnScroll={true}
                       onInit={instance => { rfInstanceRef.current = instance }}
                     >
