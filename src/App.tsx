@@ -399,14 +399,20 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   }, [edges, tagFilter, schema, activeLayout])
 
   // React Flow's native selection (marquee, click, shift-click) is the single
-  // source of truth for the selected group. Mirror it into selectedTables so
-  // the highlight + "Create layout" follow it, and clear any lingering
-  // click-focus highlight so it can't coexist with a fresh marquee selection.
+  // source of truth. A multi-selection becomes the highlighted group; a single
+  // selected table focuses it and lights up its FK-connected neighbors. Either
+  // way the previous highlight is replaced, so a stale one can't linger under a
+  // fresh marquee.
   const handleSelectionChange = useCallback(({ nodes: sel }: OnSelectionChangeParams) => {
     const ids = sel.map(n => n.id)
     setMultiSelectActive(ids.length > 1)
-    setSelectedTables(new Set(ids))
-    setHighlightTable(null)
+    if (ids.length > 1) {
+      setSelectedTables(new Set(ids))
+      setHighlightTable(null)
+    } else {
+      setSelectedTables(new Set())
+      setHighlightTable(ids[0] ?? null)
+    }
   }, [])
 
   // A plain click on a table that's already part of a multi-selection drops
