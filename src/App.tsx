@@ -402,6 +402,22 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     setMultiSelectActive(sel.length > 1)
   }, [])
 
+  // React Flow keeps a node selected on a plain click so the whole group
+  // stays draggable from any member — so a click never drops a table out of
+  // a multi-selection on its own. Snapshot who's selected right before the
+  // click reaches React Flow (capture phase), then if the clicked table was
+  // already part of a multi-selection, unselect just that one.
+  const preClickSelectionRef = useRef<Set<string>>(new Set())
+  const captureSelectionSnapshot = useCallback(() => {
+    preClickSelectionRef.current = new Set(nodesRef.current.filter(n => n.selected).map(n => n.id))
+  }, [])
+  const handleNodeClick = useCallback((_e: React.MouseEvent, node: Node) => {
+    const before = preClickSelectionRef.current
+    if (before.size > 1 && before.has(node.id)) {
+      setNodes(nds => nds.map(n => n.id === node.id ? { ...n, selected: false } : n))
+    }
+  }, [setNodes])
+
   const allTags = useMemo(() => {
     if (!schema) return []
     const counts: Record<string, number> = {}
@@ -1259,6 +1275,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
                       onNodeDrag={handleNodeDrag}
                       onNodeDragStop={handleNodeDragStop}
                       onSelectionChange={handleSelectionChange}
+                      onNodeClick={handleNodeClick}
+                      onPointerDownCapture={captureSelectionSnapshot}
                       onPaneClick={clearHighlight}
                       nodeTypes={NODE_TYPES}
                       edgeTypes={EDGE_TYPES}
