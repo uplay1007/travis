@@ -1126,7 +1126,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
         <div className={appStyles.topbarRight}>
           <button
             onClick={async () => {
-              const filename = await promptFilename('json', 'schema.json')
+              const filename = await promptFilename('json', 'schema')
               if (!filename) return
               exportJSON(serializeSchema(schema), filename)
               dialog.alert(lang === 'ru' ? 'Экспорт JSON' : 'JSON Export', lang === 'ru' ? 'Файл схемы успешно скачан.' : 'The schema file has been successfully downloaded.')
@@ -1137,7 +1137,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
           </button>
           <button
             onClick={async () => {
-              const filename = await promptFilename('sql', 'schema.sql')
+              const filename = await promptFilename('sql', 'schema')
               if (!filename) return
               downloadSQL(schema, filename)
               dialog.alert(lang === 'ru' ? 'Экспорт SQL' : 'SQL Export', lang === 'ru' ? 'SQL DDL файл успешно скачан.' : 'The SQL DDL file has been successfully downloaded.')
@@ -1148,7 +1148,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
           </button>
           <button
             onClick={async () => {
-              const filename = await promptFilename('drawio', 'schema.drawio')
+              const filename = await promptFilename('drawio', 'schema')
               if (!filename) return
               handleExportDrawio(filename)
               dialog.alert(lang === 'ru' ? 'Экспорт draw.io' : 'draw.io Export', lang === 'ru' ? 'Файл .drawio со всеми лэйаутами (вкладками) успешно скачан.' : 'The .drawio file with all layouts as tabs has been downloaded.')
