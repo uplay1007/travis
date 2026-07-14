@@ -18,18 +18,8 @@ interface Props {
   onOpen: (result: OpenResult) => void
 }
 
-const PARSERS: { value: ParserType; label: string }[] = [
-  { value: 'json',       label: 'Universal JSON' },
-  { value: 'prisma',     label: 'Prisma'         },
-  { value: 'sql',        label: 'SQL DDL'        },
-  { value: 'typeorm',    label: 'TypeORM'        },
-  { value: 'django',     label: 'Django'         },
-  { value: 'sqlalchemy', label: 'SQLAlchemy'     },
-]
-
 export function UploadZone({ theme, onThemeToggle, onOpen }: Props) {
   const [parserType, setParserType] = useState<ParserType>('json')
-  const [text, setText] = useState('')
   const [error, setError] = useState('')
   const [dragging, setDragging] = useState(false)
   const hasFileAccess = supportsFileSystemAccess()
@@ -43,6 +33,10 @@ export function UploadZone({ theme, onThemeToggle, onOpen }: Props) {
     } catch (e) {
       setError((e as Error).message)
     }
+  }, [onOpen])
+
+  const startNewProject = useCallback(() => {
+    onOpen({ schema: { tables: [] } })
   }, [onOpen])
 
   const handleOpenClick = useCallback(async () => {
@@ -95,19 +89,7 @@ export function UploadZone({ theme, onThemeToggle, onOpen }: Props) {
         <div className={styles.leftCol}>
           <div>
             <h2 className={styles.heading}>Open schema</h2>
-            <p className={styles.subheading}>Upload or paste your database schema</p>
-          </div>
-
-          <div className={styles.parserList}>
-            {PARSERS.map(p => (
-              <button
-                key={p.value}
-                onClick={() => setParserType(p.value)}
-                className={`${styles.parserBtn} ${parserType === p.value ? styles.parserBtnActive : ''}`}
-              >
-                {p.label}
-              </button>
-            ))}
+            <p className={styles.subheading}>Upload an existing schema file, or start a new project</p>
           </div>
 
           <div
@@ -132,35 +114,15 @@ export function UploadZone({ theme, onThemeToggle, onOpen }: Props) {
             )}
           </div>
 
-          <div>
-            <textarea
-              value={text}
-              onChange={e => setText(e.target.value)}
-              placeholder="...or paste schema text here"
-              className={styles.textarea}
-            />
-            <button
-              onClick={() => processText(text, parserType)}
-              disabled={!text.trim()}
-              className={`${styles.visualizeBtn} ${text.trim() ? styles.visualizeBtnActive : styles.visualizeBtnDisabled}`}
-            >
-              Visualize →
-            </button>
-          </div>
-
           {error && <div className={styles.error}>{error}</div>}
 
-          <button onClick={() => processText(DEMO_SCHEMA, 'json')} className={styles.demoBtn}>
-            Load demo schema
+          <div className={styles.divider}>or</div>
+
+          <button onClick={startNewProject} className={`${styles.visualizeBtn} ${styles.visualizeBtnActive}`}>
+            Start new project →
           </button>
         </div>
       </div>
     </div>
   )
 }
-
-const DEMO_SCHEMA = JSON.stringify({ tables: [
-  { name: "users", columns: [{ name: "id", type: "integer", primaryKey: true, nullable: false }, { name: "role_id", type: "integer", nullable: false, foreignKey: { table: "roles", column: "id" } }, { name: "email", type: "varchar", nullable: false, unique: true }] },
-  { name: "roles", columns: [{ name: "id", type: "integer", primaryKey: true, nullable: false }, { name: "name", type: "varchar", nullable: false, unique: true }] },
-  { name: "posts", columns: [{ name: "id", type: "integer", primaryKey: true, nullable: false }, { name: "user_id", type: "integer", nullable: false, foreignKey: { table: "users", column: "id" } }, { name: "title", type: "varchar", nullable: false }] },
-]}, null, 2)
