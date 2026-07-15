@@ -1,5 +1,5 @@
 import { useState, useRef, memo, useContext, useEffect } from 'react'
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { Handle, Position, useNodeId, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { tagColor } from '../../utils/colors'
 import { MultiSelectCtx } from './TableNode.multiselect'
 import { HighlightCtx } from '../../contexts/highlight'
@@ -48,18 +48,20 @@ function Badge({ label, color }: { label: string; color: string }) {
   )
 }
 
-function ColumnRow({ col, accent, linked, hidden, referenced }: {
-  col: Column; accent: string; linked: boolean; hidden: boolean; referenced: boolean
+function ColumnRow({ col, accent, linked, hidden, referenced, showHandles }: {
+  col: Column; accent: string; linked: boolean; hidden: boolean; referenced: boolean; showHandles: boolean
 }) {
   return (
     <div className={`${styles.columnRow} ${linked ? styles.columnRowLinked : ''} ${hidden ? styles.columnRowHidden : ''}`}>
       {/* per-column connection points: edges attach to the row that actually
-          holds the FK / the referenced key, instead of a single node-wide dot */}
-      {referenced && (
+          holds the FK / the referenced key, instead of a single node-wide dot.
+          Only while expanded — when collapsed the handles move to the header
+          (see TableNode) so edges don't point into the hidden column area. */}
+      {showHandles && referenced && (
         <Handle type="target" position={Position.Left} id={`col-${col.name}`}
           style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
       )}
-      {col.foreignKey && (
+      {showHandles && col.foreignKey && (
         <Handle type="source" position={Position.Right} id={`col-${col.name}`}
           style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
       )}
@@ -84,6 +86,8 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
   const { mode: viewMode, bulkKey, bulkExpand } = useContext(ViewModeCtx)
   const accent = tagColor(table.tags)
   const lastAppliedKey = useRef(0)
+  const nodeId = useNodeId()
+  const updateNodeInternals = useUpdateNodeInternals()
 
   useEffect(() => {
     if (bulkKey > lastAppliedKey.current) {
@@ -91,6 +95,17 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
       lastAppliedKey.current = bulkKey
     }
   }, [bulkKey, bulkExpand])
+
+  // When the table folds/unfolds the connection handles move between the
+  // column rows and the header, so React Flow has to re-measure them (once now
+  // and once after the 0.28s open/close animation settles) or the edges keep
+  // pointing at the handles' old positions.
+  useEffect(() => {
+    if (!nodeId) return
+    updateNodeInternals(nodeId)
+    const t = setTimeout(() => updateNodeInternals(nodeId), 320)
+    return () => clearTimeout(t)
+  }, [expanded, nodeId, updateNodeInternals])
 
   const isHighlighted = hl.active && hl.highlighted.has(table.name)
   const isDimmed = hl.active && !hl.highlighted.has(table.name)
@@ -145,6 +160,20 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
       style={{ '--accent': accent, '--accent-glow': `${accent}55`, '--accent-glow2': `${accent}44` } as React.CSSProperties}
     >
       <div className={styles.header} onClick={handleHeaderClick} onMouseDown={handleHeaderMouseDown}>
+        {/* When collapsed, all connection points live on the header so edges
+            anchor to the header instead of the now-hidden column rows. */}
+        {!showColumns && table.columns.map(col => (
+          <span key={`h-${col.name}`}>
+            {referencedColumns.has(col.name) && (
+              <Handle type="target" position={Position.Left} id={`col-${col.name}`}
+                style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
+            )}
+            {col.foreignKey && (
+              <Handle type="source" position={Position.Right} id={`col-${col.name}`}
+                style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
+            )}
+          </span>
+        ))}
         <span className={styles.headerName}>{table.name}</span>
         <div className={styles.headerRight}>
           {table.type ? (
@@ -190,6 +219,7 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
                 linked={col.name === linkedCol}
                 hidden={isCompactHidden(col)}
                 referenced={referencedColumns.has(col.name)}
+                showHandles={showColumns}
               />
             ))}
           </div>

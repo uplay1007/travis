@@ -32,6 +32,7 @@
 }
 
 .header {
+  position: relative; /* anchors the collapsed-state connection handles */
   display: flex;
   align-items: center;
   justify-content: space-between;
