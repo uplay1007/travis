@@ -505,13 +505,28 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     setSelectedTables(new Set())
   }, [])
 
-  // Click a table header. Plain click and Shift+click go through React Flow's
-  // native selection (select-one / toggle), mirrored into selectedTables by
-  // handleSelectionChange; a plain click on a member is dropped by
-  // handleNodeClick. Only Alt/Option needs custom handling here: select the
-  // table + the tables connected ONLY to it (exclusive satellites), scoped to
-  // what's physically visible right now (active layout / tag filter / all).
+  // Click a table header. Plain click goes through React Flow's native
+  // selection (select-one), mirrored into highlightTable/FK-focus by
+  // handleSelectionChange. Shift and Alt build their own group in the app
+  // state instead — both are kept out of React Flow's native selection (see
+  // TableNode's handleHeaderClick) so they don't get flattened into whatever
+  // 1-or-2-node set React Flow happens to have selected.
   const handleTableClick = useCallback((name: string, mods: { shift: boolean; alt: boolean }) => {
+    if (mods.shift) {
+      // Toggle exactly the clicked table's membership in the current group —
+      // never its own neighbours. The first shift-click seeds the group from
+      // the focused table's FK-neighbourhood (so those neighbours stay lit
+      // instead of collapsing down to just the two tables involved).
+      setSelectedTables(prev => {
+        const next = prev.size > 0
+          ? new Set(prev)
+          : (highlightTable && schema ? fkNeighborhood(schema.tables, highlightTable) : new Set<string>())
+        if (next.has(name)) next.delete(name)
+        else next.add(name)
+        return next
+      })
+      return
+    }
     if (!mods.alt || !schema) return
     const visibleTables = activeLayout
       ? schema.tables.filter(t => activeLayout.tables.includes(t.name))
@@ -526,7 +541,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     // focus + its exclusive satellites light up.
     setHighlightTable(name)
     setSelectedTables(new Set([name, ...exclusiveNeighbors(visibleTables, name)]))
-  }, [schema, activeLayout, tagFilter])
+  }, [schema, activeLayout, tagFilter, highlightTable])
 
   const highlightCtxValue = useMemo((): HighlightCtxValue => {
     // manual selection mode takes precedence over neighbor highlight

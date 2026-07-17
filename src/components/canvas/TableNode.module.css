@@ -27,7 +27,7 @@
 }
 
 .nodeDimmed {
-  opacity: 0.15;
+  opacity: 0.06;
   /* stays interactive so dimmed tables can be shift-clicked into the selection */
 }
 

@@ -133,17 +133,18 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
     : table.columns.length
 
   const handleHeaderClick = (e: React.MouseEvent) => {
-    // Alt+click builds its own exclusive-satellite selection in the app state;
-    // keep it out of React Flow's native selection (which would otherwise fire
-    // a single-node selection change and turn it into an FK-focus highlight).
-    if (e.altKey) e.stopPropagation()
+    // Alt+click and Shift+click build their own selection group in the app
+    // state (see handleTableClick); keep both out of React Flow's native
+    // selection, which would otherwise fire its own 1-or-2-node selection
+    // change and flatten the FK-focus group down to just the clicked pair.
+    if (e.altKey || e.shiftKey) e.stopPropagation()
     hl.onHighlight(table.name, { shift: e.shiftKey, alt: e.altKey })
   }
 
-  // Also stop the Alt+mousedown so React Flow's drag/select handler never
-  // selects the node (it selects on pointer-down, before the click fires).
+  // Also stop the Alt/Shift+mousedown so React Flow's drag/select handler
+  // never selects the node (it selects on pointer-down, before the click fires).
   const handleHeaderMouseDown = (e: React.MouseEvent) => {
-    if (e.altKey) e.stopPropagation()
+    if (e.altKey || e.shiftKey) e.stopPropagation()
   }
 
   const nodeClass = [
