@@ -685,10 +685,11 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
   }, [schema, baseViewMode, applyViewMode])
 
-  const createLayoutFromSelection = useCallback(() => {
+  // Shared by both entry points: the "Create layout" FAB (current selection)
+  // and the "+ Create layout" row in the Layouts dropdown (no selection
+  // needed — starts an empty layout the user then adds tables to).
+  const createLayout = useCallback((tables: string[]) => {
     if (!schema) return
-    const tables = [...highlightCtxValue.highlighted]
-    if (tables.length === 0) return
     const positions: Record<string, { x: number; y: number }> = {}
     for (const n of nodesRef.current) {
       if (tables.includes(n.id)) positions[n.id] = { x: n.position.x, y: n.position.y }
@@ -701,8 +702,16 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     setSelectedTables(new Set()); setHighlightTable(null)
     setTagFilter(null); setLayoutsOpen(false)
     setActiveLayoutId(id)
-    setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
-  }, [schema, highlightCtxValue.highlighted, viewMode])
+    if (tables.length > 0) {
+      setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
+    }
+  }, [schema, viewMode])
+
+  const createLayoutFromSelection = useCallback(() => {
+    const tables = [...highlightCtxValue.highlighted]
+    if (tables.length === 0) return
+    createLayout(tables)
+  }, [highlightCtxValue.highlighted, createLayout])
 
   // Add tables to a layout (the active one by default, or `targetLayoutId` for
   // a cross-layout add): tables already in the target are skipped; existing
@@ -1109,6 +1118,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
                     >⋯</button>
                   </div>
                 ))}
+                <div className={appStyles.groupsDivider} />
+                <button
+                  onClick={() => createLayout([])}
+                  className={appStyles.createLayoutRowBtn}
+                >
+                  <span>＋</span>
+                  <span>{lang === 'ru' ? 'Создать слой' : 'Create layout'}</span>
+                </button>
               </div>
             )}
           </div>
