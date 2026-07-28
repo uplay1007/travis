@@ -63,14 +63,23 @@ export function schemaToDSL(schema: Schema, masterPositions: Record<string, { x:
     }
   }
 
-  const posLines = (positions: Record<string, { x: number; y: number }>) =>
-    Object.entries(positions).map(([name, p]) => `  ${name} ${Math.round(p.x)} ${Math.round(p.y)}`).join('\n')
+  // Only show positions for tables that actually exist / actually belong to
+  // the layout — a layout's .positions can carry stale leftovers (e.g. from a
+  // table that was later removed from the layout, or deleted outright) that
+  // predate this editor and were never visible anywhere before. Surfacing
+  // them here would make the layout look like it has tables it doesn't.
+  const tableNames = new Set(schema.tables.map(t => t.name))
+  const posLines = (positions: Record<string, { x: number; y: number }>, allowed?: Set<string>) =>
+    Object.entries(positions)
+      .filter(([name]) => tableNames.has(name) && (!allowed || allowed.has(name)))
+      .map(([name, p]) => `  ${name} ${Math.round(p.x)} ${Math.round(p.y)}`)
+      .join('\n')
 
   const layoutBlocks = [
     `Layout "${ALL_TABLES_LAYOUT}" {\n${posLines(masterPositions)}\n}`,
     ...(schema.layouts ?? []).map(l => {
       const viewLine = l.viewMode && l.viewMode !== 'full' ? `  view ${l.viewMode}\n` : ''
-      return `Layout "${l.name}" {\n${viewLine}${posLines(l.positions)}\n}`
+      return `Layout "${l.name}" {\n${viewLine}${posLines(l.positions, new Set(l.tables))}\n}`
     }),
   ]
 

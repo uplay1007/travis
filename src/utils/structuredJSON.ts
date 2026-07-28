@@ -60,14 +60,26 @@ export function schemaToStructured(schema: Schema, masterPositions: Record<strin
     }
   }
 
+  // Only export positions for tables that actually exist / actually belong to
+  // the layout — a layout's positions can carry stale leftovers (e.g. a table
+  // later removed from the layout, or deleted outright) that were never
+  // visible anywhere before; exporting them would make the layout look like
+  // it has tables it doesn't (and re-importing derives membership from
+  // position keys, so they'd wrongly become real members again).
+  const tableNames = new Set(schema.tables.map(t => t.name))
+  const filterPositions = (positions: Record<string, { x: number; y: number }>, allowed?: Set<string>) =>
+    Object.fromEntries(
+      Object.entries(positions).filter(([name]) => tableNames.has(name) && (!allowed || allowed.has(name)))
+    )
+
   // "All tables" always comes first — it's the base view's own positions,
   // kept alongside (not merged into) any named layouts below it.
   const Layouts: StructuredLayout[] = [
-    { name: 'All tables', parameters: { view: 'full' }, positions: masterPositions },
+    { name: 'All tables', parameters: { view: 'full' }, positions: filterPositions(masterPositions) },
     ...(schema.layouts ?? []).map(l => ({
       name: l.name,
       parameters: { view: l.viewMode ?? 'full' },
-      positions: l.positions,
+      positions: filterPositions(l.positions, new Set(l.tables)),
     })),
   ]
 
