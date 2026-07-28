@@ -214,8 +214,8 @@ function withExt(name: string, ext: string): string {
   return trimmed.toLowerCase().endsWith(`.${ext}`) ? trimmed : `${trimmed}.${ext}`
 }
 
-function exportJSON(schema: Schema, filename = 'schema.json') {
-  const blob = new Blob([JSON.stringify(schemaToStructured(schema), null, 2)], { type: 'application/json' })
+function exportJSON(schema: Schema, masterPositions: Record<string, { x: number; y: number }> = {}, filename = 'schema.json') {
+  const blob = new Blob([JSON.stringify(schemaToStructured(schema, masterPositions), null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = filename; a.click()
@@ -617,7 +617,10 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     if (activeLayoutId) {
       (layoutPosRef.current[activeLayoutId] ??= {})[id] = pos
     } else if (!tagFilter) {
-      masterPositionsRef.current[id] = pos
+      // fresh object (not an in-place mutation) so consumers that only
+      // re-render on reference change (e.g. the JSON editor's live preview
+      // of master positions) actually pick up the drag
+      masterPositionsRef.current = { ...masterPositionsRef.current, [id]: pos }
     }
   }, [activeLayoutId, tagFilter])
 
@@ -860,8 +863,15 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     setEdges(e)
   }, [handleEdit, setNodes, setEdges])
 
-  const handleSchemaFromEditor = useCallback((newSchema: Schema) => {
-    applySchema(newSchema, undefined, masterPositionsRef.current)
+  const handleSchemaFromEditor = useCallback((newSchema: Schema, masterPositions?: Record<string, { x: number; y: number }>) => {
+    // the editor's text is the new ground truth for any positions it touched —
+    // override the live per-layout cache so applySchema's "keep live edits"
+    // fallback (meant to protect in-session drags on reopen) doesn't clobber
+    // what was just typed with stale in-memory values
+    for (const l of newSchema.layouts ?? []) {
+      layoutPosRef.current[l.id] = { ...l.positions }
+    }
+    applySchema(newSchema, undefined, masterPositions ?? masterPositionsRef.current)
   }, [applySchema])
 
   useEffect(() => {
@@ -909,7 +919,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       const isSql  = fileHandle.name.endsWith('.sql')
       const isJson = fileHandle.name.endsWith('.json')
       if (!isSql && !isJson) {
-        exportJSON(schemaOut)
+        exportJSON(schemaOut, masterPositionsRef.current)
         dialog.alert(
           lang === 'ru' ? 'Формат файла' : 'File format',
           lang === 'ru'
@@ -919,11 +929,11 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
         return
       }
       try {
-        const content = isSql ? exportSQL(schemaOut) : JSON.stringify(schemaToStructured(schemaOut), null, 2)
+        const content = isSql ? exportSQL(schemaOut) : JSON.stringify(schemaToStructured(schemaOut, masterPositionsRef.current), null, 2)
         await writeToHandle(fileHandle, content)
       } catch (e) {
         console.warn('File write failed, falling back to download', e)
-        exportJSON(schemaOut)
+        exportJSON(schemaOut, masterPositionsRef.current)
         dialog.alert(
           lang === 'ru' ? 'Ошибка записи' : 'Write failed',
           lang === 'ru' ? 'Не удалось сохранить в файл. Схема скачана как копия.' : 'Could not write to file. Schema downloaded as a copy instead.'
@@ -931,7 +941,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
         return
       }
     } else {
-      exportJSON(schemaOut)
+      exportJSON(schemaOut, masterPositionsRef.current)
     }
 
     setSaveFlash(true)
@@ -1014,8 +1024,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   const handleOpen = useCallback((result: OpenResult) => {
     setHighlightTable(null); setSelectedTables(new Set()); setTagFilter(null); setActiveLayoutId(null)
     setFileHandle(result.fileHandle ?? null)
-    applySchema(result.schema, undefined, result.positions)
-    const hasPositions = result.positions && Object.keys(result.positions).length > 0
+    // a JSON export's "All tables" entry is the master view's own positions,
+    // not a real named layout — pull it back out before it's treated as one
+    const allTablesLayout = result.schema.layouts?.find(l => l.name === 'All tables')
+    const remaining = allTablesLayout ? result.schema.layouts!.filter(l => l !== allTablesLayout) : undefined
+    const schemaToOpen = allTablesLayout ? { ...result.schema, layouts: remaining!.length ? remaining : undefined } : result.schema
+    const positions = allTablesLayout?.positions ?? result.positions
+    applySchema(schemaToOpen, undefined, positions)
+    const hasPositions = positions && Object.keys(positions).length > 0
     if (!hasPositions) setTimeout(() => setPendingELK(true), 250)
   }, [applySchema])
 
@@ -1176,7 +1192,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
             onClick={async () => {
               const filename = await promptFilename('json', 'schema')
               if (!filename) return
-              exportJSON(serializeSchema(schema), filename)
+              exportJSON(serializeSchema(schema), masterPositionsRef.current, filename)
               dialog.alert(lang === 'ru' ? 'Экспорт JSON' : 'JSON Export', lang === 'ru' ? 'Файл схемы успешно скачан.' : 'The schema file has been successfully downloaded.')
             }}
             className={appStyles.exportBtn}
@@ -1225,7 +1241,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
             {splitView ? (
               <>
                 <div className={appStyles.splitEditorPane} style={{ width: editorWidth }}>
-                  <SchemaEditor schema={schema} onSchemaChange={handleSchemaFromEditor} onValidityChange={setSchemaValid} width={editorWidth} />
+                  <SchemaEditor schema={schema} masterPositions={masterPositionsRef.current} onSchemaChange={handleSchemaFromEditor} onValidityChange={setSchemaValid} width={editorWidth} />
                 </div>
                 <div className={appStyles.resizeHandle} onMouseDown={handleResizeStart} />
               </>

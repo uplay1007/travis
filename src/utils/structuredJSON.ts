@@ -40,7 +40,7 @@ export function isStructuredSchema(raw: unknown): raw is StructuredSchema {
   return !!o && (Array.isArray(o.Tables) || Array.isArray(o.Relations))
 }
 
-export function schemaToStructured(schema: Schema): StructuredSchema {
+export function schemaToStructured(schema: Schema, masterPositions: Record<string, { x: number; y: number }> = {}): StructuredSchema {
   const Tables: StructuredTable[] = schema.tables.map(t => ({
     name: t.name,
     ...(t.type ? { type: t.type } : {}),
@@ -60,11 +60,16 @@ export function schemaToStructured(schema: Schema): StructuredSchema {
     }
   }
 
-  const Layouts: StructuredLayout[] = (schema.layouts ?? []).map(l => ({
-    name: l.name,
-    parameters: { view: l.viewMode ?? 'full' },
-    positions: l.positions,
-  }))
+  // "All tables" always comes first — it's the base view's own positions,
+  // kept alongside (not merged into) any named layouts below it.
+  const Layouts: StructuredLayout[] = [
+    { name: 'All tables', parameters: { view: 'full' }, positions: masterPositions },
+    ...(schema.layouts ?? []).map(l => ({
+      name: l.name,
+      parameters: { view: l.viewMode ?? 'full' },
+      positions: l.positions,
+    })),
+  ]
 
   const tagTables = new Map<string, string[]>()
   for (const t of schema.tables) {

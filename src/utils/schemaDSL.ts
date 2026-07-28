@@ -1,4 +1,4 @@
-import type { Schema, Table, Column } from '../types/schema'
+import type { Schema, Table, Column, Layout } from '../types/schema'
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
 
@@ -29,11 +29,22 @@ function isKnownType(type: string): boolean {
 }
 
 export interface DSLDiagnostic { line: number; message: string }
-export interface DSLResult { schema: Schema; diagnostics: DSLDiagnostic[] }
+export interface DSLResult {
+  schema: Schema
+  diagnostics: DSLDiagnostic[]
+  // present only when a Layout "All tables" block was found in the text —
+  // its positions live outside schema.layouts (that's the "All tables" view's
+  // own master position set, not a named layout)
+  masterPositions?: Record<string, { x: number; y: number }>
+}
+
+const ALL_TABLES_LAYOUT = 'All tables'
 
 // ── Schema → DSL text ──────────────────────────────────────────────────────
 // Tables hold only attributes; foreign keys live in a separate Relations block.
-export function schemaToDSL(schema: Schema): string {
+// Layout blocks hold per-table pixel positions — one implicit "All tables"
+// block for the master view, then one per named layout.
+export function schemaToDSL(schema: Schema, masterPositions: Record<string, { x: number; y: number }> = {}): string {
   const blocks = schema.tables.map(t => {
     const cols = t.columns.map(c => {
       const parts = [c.name, c.type]
@@ -52,7 +63,18 @@ export function schemaToDSL(schema: Schema): string {
     }
   }
 
-  return [...blocks, `Relations {\n${rels.join('\n')}\n}`].join('\n\n')
+  const posLines = (positions: Record<string, { x: number; y: number }>) =>
+    Object.entries(positions).map(([name, p]) => `  ${name} ${Math.round(p.x)} ${Math.round(p.y)}`).join('\n')
+
+  const layoutBlocks = [
+    `Layout "${ALL_TABLES_LAYOUT}" {\n${posLines(masterPositions)}\n}`,
+    ...(schema.layouts ?? []).map(l => {
+      const viewLine = l.viewMode && l.viewMode !== 'full' ? `  view ${l.viewMode}\n` : ''
+      return `Layout "${l.name}" {\n${viewLine}${posLines(l.positions)}\n}`
+    }),
+  ]
+
+  return [...blocks, `Relations {\n${rels.join('\n')}\n}`, ...layoutBlocks].join('\n\n')
 }
 
 // ── DSL text → Schema + diagnostics ────────────────────────────────────────
@@ -60,15 +82,23 @@ const REL_RE = /^([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*>\s*([A-Za-z_]\w*)\.([A-Za-z_]
 
 export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
   const prevTags = new Map(prevSchema?.tables.map(t => [t.name, t.tags ?? []]) ?? [])
+  const prevLayouts = new Map(prevSchema?.layouts?.map(l => [l.name, l]) ?? [])
   const diagnostics: DSLDiagnostic[] = []
   const tables: Table[] = []
   const byName = new Map<string, Table>()
   const relLines: { line: number; text: string }[] = []
+  const layouts: Layout[] = []
+  let masterPositions: Record<string, { x: number; y: number }> | undefined
+  // deferred like relLines — a layout's position lines reference table names
+  // that may be declared later in the text, so they're validated in a second
+  // pass once every Table block has been parsed
+  const layoutBlocks: { name: string; lines: { line: number; text: string }[] }[] = []
 
   const lines = text.split('\n')
-  let mode: 'none' | 'table' | 'relations' = 'none'
+  let mode: 'none' | 'table' | 'relations' | 'layout' = 'none'
   let cur: Table | null = null
   let curCols: Set<string> | null = null
+  let curLayoutLines: { line: number; text: string }[] | null = null
 
   for (let i = 0; i < lines.length; i++) {
     const lineNo = i + 1
@@ -77,6 +107,16 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
 
     if (mode === 'none') {
       if (/^Relations\b/i.test(line)) { mode = 'relations'; continue }
+      const lm = /^Layout\s+"([^"]*)"\s*\{?\s*$/i.exec(line)
+      if (lm) {
+        const name = lm[1].trim()
+        if (!name) diagnostics.push({ line: lineNo, message: `Layout name cannot be empty` })
+        const blockLines: { line: number; text: string }[] = []
+        layoutBlocks.push({ name, lines: blockLines })
+        curLayoutLines = blockLines
+        mode = 'layout'
+        continue
+      }
       const tm = /^Table\s+(.+?)\s*\{?\s*$/i.exec(line)
       if (tm) {
         const name = tm[1].trim()
@@ -88,7 +128,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
         mode = 'table'
         continue
       }
-      diagnostics.push({ line: lineNo, message: `Unexpected "${line}" — expected a Table or Relations block` })
+      diagnostics.push({ line: lineNo, message: `Unexpected "${line}" — expected a Table, Relations or Layout block` })
       continue
     }
 
@@ -115,6 +155,12 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
       continue
     }
 
+    if (mode === 'layout') {
+      if (line === '}') { mode = 'none'; curLayoutLines = null; continue }
+      curLayoutLines!.push({ line: lineNo, text: line })
+      continue
+    }
+
     // mode === 'relations'
     if (line === '}') { mode = 'none'; continue }
     relLines.push({ line: lineNo, text: line })
@@ -138,5 +184,38 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
     srcCol.foreignKey = { table: tT, column: tC }
   }
 
-  return { schema: { tables }, diagnostics }
+  // validate layout position lines against the parsed tables
+  for (const block of layoutBlocks) {
+    const positions: Record<string, { x: number; y: number }> = {}
+    let view: Layout['viewMode'] | undefined
+    for (const { line, text: raw } of block.lines) {
+      const vm = /^view\s+(full|compact|collapsed)\s*$/i.exec(raw)
+      if (vm) { view = vm[1].toLowerCase() as Layout['viewMode']; continue }
+      const pm = /^([A-Za-z_]\w*)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*$/.exec(raw)
+      if (pm) {
+        const [, tblName, xs, ys] = pm
+        if (!byName.has(tblName)) diagnostics.push({ line, message: `Unknown table "${tblName}" in layout "${block.name}"` })
+        else positions[tblName] = { x: parseFloat(xs), y: parseFloat(ys) }
+        continue
+      }
+      diagnostics.push({ line, message: `Invalid line in layout block — expected "table x y" or "view <full|compact|collapsed>"` })
+    }
+    if (!block.name) continue
+    if (block.name === ALL_TABLES_LAYOUT) {
+      masterPositions = positions
+    } else {
+      const prev = prevLayouts.get(block.name)
+      layouts.push({
+        id: prev?.id ?? crypto.randomUUID(),
+        name: block.name,
+        tables: Object.keys(positions),
+        positions,
+        ...(view ? { viewMode: view } : {}),
+      })
+    }
+  }
+
+  const schema: Schema = { tables }
+  if (layouts.length) schema.layouts = layouts
+  return { schema, diagnostics, masterPositions }
 }

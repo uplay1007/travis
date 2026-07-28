@@ -8,8 +8,8 @@ import { schemaToDSL, dslToSchema, type DSLDiagnostic } from '../../utils/schema
 import type { Schema } from '../../types/schema'
 import styles from './SchemaEditor.module.css'
 
-const KEYWORDS = new Set(['Table', 'Relations'])
-const MODIFIERS = new Set(['pk', 'unique', 'null'])
+const KEYWORDS = new Set(['Table', 'Relations', 'Layout'])
+const MODIFIERS = new Set(['pk', 'unique', 'null', 'view'])
 
 const schemaLang = StreamLanguage.define<Record<string, never>>({
   startState: () => ({}),
@@ -45,19 +45,24 @@ const dslLinter = linter(view => {
   })
 }, { delay: 350 })
 
+type Positions = Record<string, { x: number; y: number }>
+
 interface Props {
   schema: Schema
-  onSchemaChange: (schema: Schema) => void
+  masterPositions: Positions
+  onSchemaChange: (schema: Schema, masterPositions?: Positions) => void
   onValidityChange?: (valid: boolean) => void
   width?: number
 }
 
-export function SchemaEditor({ schema, onSchemaChange, onValidityChange, width = 380 }: Props) {
+export function SchemaEditor({ schema, masterPositions, onSchemaChange, onValidityChange, width = 380 }: Props) {
   const fontSize = Math.max(11, Math.min(16, Math.round(13 * width / 380)))
   const schemaRef = useRef(schema)
   schemaRef.current = schema
+  const masterPositionsRef = useRef(masterPositions)
+  masterPositionsRef.current = masterPositions
 
-  const [text, setText] = useState(() => schemaToDSL(schema))
+  const [text, setText] = useState(() => schemaToDSL(schema, masterPositions))
   const [diagnostics, setDiagnostics] = useState<DSLDiagnostic[]>([])
   const isFocused = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -76,26 +81,26 @@ export function SchemaEditor({ schema, onSchemaChange, onValidityChange, width =
 
   useEffect(() => {
     if (!isFocused.current) {
-      setText(schemaToDSL(schema))
+      setText(schemaToDSL(schema, masterPositions))
       setDiagnostics([])
     }
-  }, [schema])
+  }, [schema, masterPositions])
 
   const handleChange = useCallback((value: string) => {
     setText(value)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      const { schema: parsed, diagnostics: diags } = dslToSchema(value, schemaRef.current)
+      const { schema: parsed, diagnostics: diags, masterPositions: parsedMaster } = dslToSchema(value, schemaRef.current)
       setDiagnostics(diags)
       onValidityChange?.(diags.length === 0)
-      if (diags.length === 0) onSchemaChange(parsed)
+      if (diags.length === 0) onSchemaChange(parsed, parsedMaster)
     }, 400)
   }, [onSchemaChange, onValidityChange])
 
   const handleBlur = useCallback((e: React.FocusEvent) => {
     if (!containerRef.current?.contains(e.relatedTarget as Node)) {
       isFocused.current = false
-      if (diagnostics.length === 0) setText(schemaToDSL(schemaRef.current))
+      if (diagnostics.length === 0) setText(schemaToDSL(schemaRef.current, masterPositionsRef.current))
     }
   }, [diagnostics])
 
