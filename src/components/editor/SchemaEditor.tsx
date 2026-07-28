@@ -104,9 +104,18 @@ export function SchemaEditor({ schema, masterPositions, onSchemaChange, onValidi
       const next = schemaToDSL(schema, masterPositions)
       setText(next)
       textRef.current = next
-      setDiagnostics([])
+      // validate the freshly-generated text instead of assuming it's clean —
+      // schemaToDSL is a mechanical dump of the current schema, and that
+      // schema can itself contain something the round-trip considers invalid
+      // (e.g. previously the false-positive on composite-PK+FK columns).
+      // Without this, the header banner said "valid" while the inline linter
+      // (which re-validates independently on its own timer) underlined the
+      // very same lines — sat wrong until the user's next keystroke.
+      const { diagnostics: diags } = dslToSchema(next, schema)
+      setDiagnostics(diags)
+      onValidityChange?.(diags.length === 0)
     }
-  }, [schema, masterPositions])
+  }, [schema, masterPositions, onValidityChange])
 
   const handleChange = useCallback((value: string) => {
     setText(value)

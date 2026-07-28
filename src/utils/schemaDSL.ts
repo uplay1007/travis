@@ -188,7 +188,10 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
     if (!tgt) { diagnostics.push({ line, message: `Unknown table "${tT}"` }); continue }
     const tgtCol = tgt.columns.find(c => c.name === tC)
     if (!tgtCol) { diagnostics.push({ line, message: `"${tT}" has no column "${tC}"` }); continue }
-    if (srcCol.primaryKey) { diagnostics.push({ line, message: `"${sT}.${sC}" is a primary key — a PK can't reference another table (flip the direction?)` }); continue }
+    // a source column being a primary key is NOT an error on its own — it's
+    // exactly the shape of a composite-PK junction table (product_tags.tag_id
+    // is both PK and FK) or a 1:1 extension table (child.id PK referencing
+    // parent.id), both legitimate, common patterns.
     if (!tgtCol.primaryKey && !tgtCol.unique) { diagnostics.push({ line, message: `"${tT}.${tC}" must be a primary key or unique to be referenced` }); continue }
     srcCol.foreignKey = { table: tT, column: tC }
   }
