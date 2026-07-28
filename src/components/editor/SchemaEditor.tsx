@@ -63,15 +63,35 @@ export function SchemaEditor({ schema, masterPositions, onSchemaChange, onValidi
   masterPositionsRef.current = masterPositions
 
   const [text, setText] = useState(() => schemaToDSL(schema, masterPositions))
+  const textRef = useRef(text)
   const [diagnostics, setDiagnostics] = useState<DSLDiagnostic[]>([])
   const isFocused = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editorViewRef = useRef<EditorView | null>(null)
 
+  // parse, validate and (if valid) apply — shared by the debounced timer and
+  // the flush-on-blur/unmount paths below. Returns whether it committed.
+  const commit = useCallback((value: string) => {
+    const { schema: parsed, diagnostics: diags, masterPositions: parsedMaster } = dslToSchema(value, schemaRef.current)
+    setDiagnostics(diags)
+    onValidityChange?.(diags.length === 0)
+    if (diags.length === 0) onSchemaChange(parsed, parsedMaster)
+    return diags.length === 0
+  }, [onSchemaChange, onValidityChange])
+
   useEffect(() => {
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [])
+    return () => {
+      // flush a pending edit instead of silently discarding it — otherwise
+      // closing the panel (or navigating away) within the 400ms debounce
+      // window loses whatever was just typed, and a reload shows the schema
+      // from before that edit was ever applied
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current)
+        commit(textRef.current)
+      }
+    }
+  }, [commit])
 
   const [searchQuery, setSearchQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -81,28 +101,41 @@ export function SchemaEditor({ schema, masterPositions, onSchemaChange, onValidi
 
   useEffect(() => {
     if (!isFocused.current) {
-      setText(schemaToDSL(schema, masterPositions))
+      const next = schemaToDSL(schema, masterPositions)
+      setText(next)
+      textRef.current = next
       setDiagnostics([])
     }
   }, [schema, masterPositions])
 
   const handleChange = useCallback((value: string) => {
     setText(value)
+    textRef.current = value
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      const { schema: parsed, diagnostics: diags, masterPositions: parsedMaster } = dslToSchema(value, schemaRef.current)
-      setDiagnostics(diags)
-      onValidityChange?.(diags.length === 0)
-      if (diags.length === 0) onSchemaChange(parsed, parsedMaster)
+      debounceRef.current = null
+      commit(value)
     }, 400)
-  }, [onSchemaChange, onValidityChange])
+  }, [commit])
 
   const handleBlur = useCallback((e: React.FocusEvent) => {
     if (!containerRef.current?.contains(e.relatedTarget as Node)) {
       isFocused.current = false
-      if (diagnostics.length === 0) setText(schemaToDSL(schemaRef.current, masterPositionsRef.current))
+      // flush a pending edit right away instead of leaving it to the timer —
+      // and don't also reformat from (still stale) schemaRef in that case
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current)
+        debounceRef.current = null
+        commit(textRef.current)
+        return
+      }
+      if (diagnostics.length === 0) {
+        const next = schemaToDSL(schemaRef.current, masterPositionsRef.current)
+        setText(next)
+        textRef.current = next
+      }
     }
-  }, [diagnostics])
+  }, [diagnostics, commit])
 
   const tableNames = useMemo(
     () => schema.tables.map(t => t.name),
