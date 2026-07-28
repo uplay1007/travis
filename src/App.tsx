@@ -903,11 +903,35 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     saveCurrentSession({ schema: serializeSchema(schema), positions: masterPositionsRef.current, activeLayoutId: activeLayoutIdRef.current })
   }, [schema, serializeSchema])
 
+  const dragSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (nodes.length === 0 || !schema) return
-    const handle = setTimeout(persistSessionNow, 1000)
-    return () => clearTimeout(handle)
+    dragSaveTimerRef.current = setTimeout(() => {
+      dragSaveTimerRef.current = null
+      persistSessionNow()
+    }, 1000)
+    return () => { if (dragSaveTimerRef.current) clearTimeout(dragSaveTimerRef.current) }
   }, [nodes, schema, persistSessionNow])
+
+  // flush a still-pending drag autosave before the tab actually closes or
+  // reloads — otherwise dragging a table and reloading within the 1s debounce
+  // window loses that position (same class of bug as the JSON/DSL editor's
+  // flush-on-unmount, just for canvas drags instead of typed edits)
+  useEffect(() => {
+    const flush = () => {
+      if (dragSaveTimerRef.current) {
+        clearTimeout(dragSaveTimerRef.current)
+        dragSaveTimerRef.current = null
+        persistSessionNow()
+      }
+    }
+    window.addEventListener('beforeunload', flush)
+    window.addEventListener('pagehide', flush)
+    return () => {
+      window.removeEventListener('beforeunload', flush)
+      window.removeEventListener('pagehide', flush)
+    }
+  }, [persistSessionNow])
 
   // Save = write back to the open file handle if there is one; otherwise
   // download a fresh copy (there's no cloud to persist to — local only).
