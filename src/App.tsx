@@ -405,6 +405,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // fresh marquee.
   const handleSelectionChange = useCallback(({ nodes: sel }: OnSelectionChangeParams) => {
     const ids = sel.map(n => n.id)
+    // XYFlow's own drag machinery force-clears native selection (fires this with
+    // an empty array) at the start of any drag on a node it doesn't consider
+    // selected — which is every Alt/Cmd-highlighted node, since that selection
+    // lives in our own selectedTables/highlightTable state, never in React
+    // Flow's native `selected`. Ignoring the empty case here keeps our manual
+    // group intact through a drag; real "clear everything" already goes
+    // through onPaneClick.
+    if (ids.length === 0) return
     setMultiSelectActive(ids.length > 1)
     if (ids.length > 1) {
       setSelectedTables(new Set(ids))
@@ -419,9 +427,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // just it out of the group. React Flow keeps a clicked member selected on
   // its own (so the group stays draggable) and its mousedown handler is a
   // no-op for an already-selected member — so nodesRef still holds the whole
-  // group here. Shift/Alt clicks are handled by React Flow / handleTableClick.
+  // group here. Cmd/Alt clicks are handled by React Flow / handleTableClick.
   const handleNodeClick = useCallback((e: React.MouseEvent, node: Node) => {
-    if (e.shiftKey || e.altKey) return
+    if (e.metaKey || e.altKey) return
     const selected = nodesRef.current.filter(n => n.selected)
     if (selected.length > 1 && selected.some(n => n.id === node.id)) {
       setNodes(nds => nds.map(n => n.id === node.id ? { ...n, selected: false } : n))
@@ -507,14 +515,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
 
   // Click a table header. Plain click goes through React Flow's native
   // selection (select-one), mirrored into highlightTable/FK-focus by
-  // handleSelectionChange. Shift and Alt build their own group in the app
+  // handleSelectionChange. Cmd and Alt build their own group in the app
   // state instead — both are kept out of React Flow's native selection (see
   // TableNode's handleHeaderClick) so they don't get flattened into whatever
   // 1-or-2-node set React Flow happens to have selected.
-  const handleTableClick = useCallback((name: string, mods: { shift: boolean; alt: boolean }) => {
-    if (mods.shift) {
+  const handleTableClick = useCallback((name: string, mods: { cmd: boolean; alt: boolean }) => {
+    if (mods.cmd) {
       // Toggle exactly the clicked table's membership in the current group —
-      // never its own neighbours. The first shift-click seeds the group from
+      // never its own neighbours. The first cmd-click seeds the group from
       // the focused table's FK-neighbourhood (so those neighbours stay lit
       // instead of collapsing down to just the two tables involved).
       setSelectedTables(prev => {
@@ -1357,6 +1365,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
                       selectionMode={SelectionMode.Partial}
                       panOnDrag={[2]}
                       selectionOnDrag
+                      selectNodesOnDrag={false}
                       multiSelectionKeyCode="Shift"
                       panOnScroll={true}
                       onInit={instance => { rfInstanceRef.current = instance }}

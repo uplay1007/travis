@@ -113,13 +113,13 @@ export function OrthoEdge({
         fill="none"
         stroke={activeColor}
         strokeWidth={edgeHighlighted ? 2.5 : hovered ? 2.5 : 1.5}
-        strokeOpacity={edgeDimmed ? 0.06 : 1}
+        strokeOpacity={edgeDimmed ? 0.3 : 1}
         style={{ transition: 'stroke-width 0.15s, stroke-opacity 0.2s', pointerEvents: 'none' }}
       />
       <circle cx={startDot.x} cy={startDot.y} r={edgeHighlighted ? 5 : 4} fill={activeColor}
-        opacity={edgeDimmed ? 0.06 : 1} style={{ pointerEvents: 'none' }} />
+        opacity={edgeDimmed ? 0.3 : 1} style={{ pointerEvents: 'none' }} />
       <circle cx={endDot.x} cy={endDot.y} r={edgeHighlighted ? 5 : 4} fill={activeColor}
-        opacity={edgeDimmed ? 0.06 : 1} style={{ pointerEvents: 'none' }} />
+        opacity={edgeDimmed ? 0.3 : 1} style={{ pointerEvents: 'none' }} />
 
       {relType && !edgeDimmed && (
         <>

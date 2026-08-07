@@ -27,8 +27,8 @@
 }
 
 .nodeDimmed {
-  opacity: 0.06;
-  /* stays interactive so dimmed tables can be shift-clicked into the selection */
+  opacity: 0.3;
+  /* stays interactive so dimmed tables can be ctrl-clicked into the selection */
 }
 
 .header {
