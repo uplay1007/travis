@@ -47,6 +47,11 @@
   justify-content: center;
 }
 
+.bodyTwoCol {
+  justify-content: flex-start;
+  gap: 48px;
+}
+
 /* ── Left column ──────────────────────────────────────────────────── */
 
 .leftCol {
@@ -55,6 +60,12 @@
   display: flex;
   flex-direction: column;
   gap: 28px;
+}
+
+.leftColShared {
+  width: auto;
+  max-width: 640px;
+  flex: 1;
 }
 
 .heading {
@@ -151,5 +162,110 @@
   color: #f87171;
   background: rgba(239, 68, 68, 0.08);
   border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+/* ── Right column (local saves) ──────────────────────────────────────── */
+
+.rightCol {
+  width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  flex-shrink: 0;
+}
+
+.savesList {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.saveCard {
+  border-radius: 18px;
+  border: 1px solid rgba(var(--overlay-rgb), 0.1);
+  padding: 18px 20px;
+  background: rgba(var(--overlay-rgb), 0.03);
+}
+
+.saveCardTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.saveCardName {
+  color: var(--text-on-surface);
+  font-weight: 700;
+  font-size: 17px;
+  flex: 1;
+}
+
+.saveDeleteBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #4b5563;
+  margin-left: 8px;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 17px;
+  transition: all 0.2s;
+}
+
+.saveDeleteBtnConfirm {
+  font-size: 12px;
+  background: #ef4444;
+  color: white;
+  padding: 4px 8px;
+  font-weight: 700;
+}
+
+.saveTableTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.saveTableTag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 8px;
+  /* background and color set via inline CSS vars */
+  background: var(--tag-bg, rgba(99, 102, 241, 0.13));
+  color: var(--tag-color, #6366f1);
+}
+
+.saveTableTagExtra {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 8px;
+  background: rgba(var(--overlay-rgb), 0.06);
+  color: #6b7280;
+}
+
+.saveCardBottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.saveDate {
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.openBtn {
+  font-size: 14px;
+  font-weight: 700;
+  padding: 8px 20px;
+  border-radius: 10px;
+  background: #6366f1;
+  color: white;
+  border: none;
+  cursor: pointer;
 }
 

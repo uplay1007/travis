@@ -1,6 +1,9 @@
 import { useState, useCallback } from 'react'
 import { parseSchema, detectParser, type ParserType } from '../../utils/parsers'
 import { openFilePicker, getHandleFromDrop, supportsFileSystemAccess } from '../../utils/fileAccess'
+import { getSaves, deleteDB, type SavedDB } from '../../utils/storage'
+import { tableColor } from '../../utils/colors'
+import { T, type Lang } from '../../i18n'
 import type { Schema } from '../../types/schema'
 import { Logo } from '../ui/Logo'
 import { ThemeSwitch } from '../ui/ThemeSwitch'
@@ -10,19 +13,42 @@ export interface OpenResult {
   schema: Schema
   fileHandle?: FileSystemFileHandle
   positions?: Record<string, { x: number; y: number }>
+  saveId?: string
+  saveName?: string
 }
 
 interface Props {
+  lang: Lang
   theme: 'dark' | 'light'
   onThemeToggle: () => void
   onOpen: (result: OpenResult) => void
 }
 
-export function UploadZone({ theme, onThemeToggle, onOpen }: Props) {
+function fmtDate(iso: string, lang: Lang) {
+  return new Date(iso).toLocaleString(lang === 'ru' ? 'ru-RU' : 'en-US', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+}
+
+export function UploadZone({ lang, theme, onThemeToggle, onOpen }: Props) {
+  const t = T[lang]
   const [parserType, setParserType] = useState<ParserType>('json')
   const [error, setError] = useState('')
   const [dragging, setDragging] = useState(false)
+  const [saves, setSaves] = useState<SavedDB[]>(() => getSaves())
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const hasFileAccess = supportsFileSystemAccess()
+
+  const handleDeleteSave = (id: string) => {
+    if (confirmDeleteId === id) {
+      deleteDB(id)
+      setSaves(s => s.filter(x => x.id !== id))
+      setConfirmDeleteId(null)
+    } else {
+      setConfirmDeleteId(id)
+      setTimeout(() => setConfirmDeleteId(prev => prev === id ? null : prev), 3000)
+    }
+  }
 
   const processText = useCallback(async (content: string, type: ParserType, handle?: FileSystemFileHandle) => {
     try {
@@ -85,8 +111,8 @@ export function UploadZone({ theme, onThemeToggle, onOpen }: Props) {
         </div>
       </div>
 
-      <div className={styles.body}>
-        <div className={styles.leftCol}>
+      <div className={`${styles.body} ${saves.length > 0 ? styles.bodyTwoCol : ''}`}>
+        <div className={`${styles.leftCol} ${saves.length > 0 ? styles.leftColShared : ''}`}>
           <div>
             <h2 className={styles.heading}>Open schema</h2>
             <p className={styles.subheading}>Upload an existing schema file, or start a new project</p>
@@ -122,6 +148,61 @@ export function UploadZone({ theme, onThemeToggle, onOpen }: Props) {
             Start new project →
           </button>
         </div>
+
+        {saves.length > 0 && (
+          <div className={styles.rightCol}>
+            <div>
+              <h2 className={styles.heading}>{t.savedSchemas}</h2>
+            </div>
+
+            <div className={styles.savesList}>
+              {saves.map(save => {
+                const isConfirming = confirmDeleteId === save.id
+                return (
+                  <div key={save.id} className={styles.saveCard}>
+                    <div className={styles.saveCardTop}>
+                      <span className={styles.saveCardName}>{save.name}</span>
+                      <button
+                        onClick={() => handleDeleteSave(save.id)}
+                        className={`${styles.saveDeleteBtn} ${isConfirming ? styles.saveDeleteBtnConfirm : ''}`}
+                      >
+                        {isConfirming ? (lang === 'ru' ? 'Удалить?' : 'Confirm?') : '🗑️'}
+                      </button>
+                    </div>
+                    <div className={styles.saveTableTags}>
+                      {save.schema.tables.slice(0, 6).map(tbl => (
+                        <span
+                          key={tbl.name}
+                          className={styles.saveTableTag}
+                          style={{
+                            '--tag-bg': `${tableColor(tbl.name)}22`,
+                            '--tag-color': tableColor(tbl.name),
+                          } as React.CSSProperties}
+                        >
+                          {tbl.name}
+                        </span>
+                      ))}
+                      {save.schema.tables.length > 6 && (
+                        <span className={styles.saveTableTagExtra}>
+                          +{save.schema.tables.length - 6}
+                        </span>
+                      )}
+                    </div>
+                    <div className={styles.saveCardBottom}>
+                      <span className={styles.saveDate}>{fmtDate(save.savedAt, lang)}</span>
+                      <button
+                        onClick={() => onOpen({ schema: save.schema, positions: save.positions, saveId: save.id, saveName: save.name })}
+                        className={styles.openBtn}
+                      >
+                        {t.open}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
