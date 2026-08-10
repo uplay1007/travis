@@ -23,6 +23,9 @@ export const T = {
     exitBtn: 'Exit DB',
     delete: 'Delete',
     confirmDelete: (name: string) => `Delete saved schema "${name}"?`,
+    savedSchemas: 'Recent projects',
+    noSaves: 'No saved projects yet',
+    open: 'Open',
   },
   ru: {
     appName: 'TraVis',
@@ -46,5 +49,8 @@ export const T = {
     exitBtn: 'Выйти из БД',
     delete: 'Удалить',
     confirmDelete: (name: string) => `Удалить сохранённую схему «${name}»?`,
+    savedSchemas: 'Недавние проекты',
+    noSaves: 'Пока нет сохранённых проектов',
+    open: 'Открыть',
   },
 } as const

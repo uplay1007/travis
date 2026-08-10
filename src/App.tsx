@@ -22,7 +22,7 @@ import type { Schema, Table, Column, Layout } from './types/schema'
 import { computeLayout } from './utils/layout'
 import { tableColor, tagColor } from './utils/colors'
 import {
-  saveCurrentSession, loadCurrentSession, clearCurrentSession,
+  saveCurrentSession, loadCurrentSession, clearCurrentSession, saveDB,
 } from './utils/storage'
 import { TableNode, type TableNodeData, MultiSelectCtx } from './components/canvas/TableNode'
 import { HighlightCtx, type HighlightCtxValue } from './contexts/highlight'
@@ -260,6 +260,11 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
 
   const [schema, setSchema] = useState<Schema | null>(session?.schema ?? null)
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null)
+  // links this session to an entry in the local saves list (utils/storage.ts);
+  // null until the first fileless Save prompts for a name, or until a saved
+  // project is opened from the main menu's list
+  const [currentSaveId, setCurrentSaveId] = useState<string | null>(null)
+  const [currentSaveName, setCurrentSaveName] = useState<string | null>(null)
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
@@ -941,11 +946,17 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     }
   }, [persistSessionNow])
 
-  // Save = write back to the open file handle if there is one; otherwise
-  // download a fresh copy (there's no cloud to persist to — local only).
+  // Save = write back to the open file handle if there is one, AND always
+  // mirror into the local saves list (utils/storage.ts) so the project shows
+  // up in the main menu's "Recent projects" on next Exit — regardless of
+  // whether it's a fileless project or one opened from disk. Name comes from
+  // the file's own name when there's a handle (no prompt); otherwise it's
+  // asked once, the first Save of the session, then reused on every later
+  // Save via currentSaveId.
   const handleSave = useCallback(async () => {
     if (!schema) return
     const schemaOut = serializeSchema(schema)
+    let name = currentSaveName
 
     if (fileHandle) {
       const isSql  = fileHandle.name.endsWith('.sql')
@@ -972,14 +983,25 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
         )
         return
       }
-    } else {
-      exportJSON(schemaOut, masterPositionsRef.current)
+      name = name ?? fileHandle.name.replace(/\.[^.]+$/, '')
+    } else if (!currentSaveId) {
+      const promptedName = await dialog.prompt(
+        lang === 'ru' ? 'Имя проекта' : 'Project name',
+        lang === 'ru' ? 'Введите имя для сохранения в списке проектов' : 'Enter a name to save this project under',
+        schema.tables[0]?.name ?? (lang === 'ru' ? 'Без названия' : 'Untitled')
+      )
+      if (promptedName === null) return
+      name = promptedName.trim() || (lang === 'ru' ? 'Без названия' : 'Untitled')
     }
+
+    const entry = saveDB(name!, schemaOut, masterPositionsRef.current, currentSaveId ?? undefined)
+    setCurrentSaveId(entry.id)
+    setCurrentSaveName(entry.name)
 
     setSaveFlash(true)
     setTimeout(() => setSaveFlash(false), 1500)
     dialog.alert(lang === 'ru' ? 'Сохранение' : 'Saved', lang === 'ru' ? 'Изменения успешно сохранены!' : 'All changes have been successfully saved.')
-  }, [schema, fileHandle, dialog, lang, serializeSchema])
+  }, [schema, fileHandle, dialog, lang, serializeSchema, currentSaveId, currentSaveName])
 
   // asks for a filename before an export download; returns null if the user cancels
   const promptFilename = useCallback(async (ext: string, defaultName: string) => {
@@ -1003,6 +1025,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   const handleExit = useCallback(() => {
     clearCurrentSession(); setSchema(null)
     setFileHandle(null); setTagFilter(null); setActiveLayoutId(null); setEditorState(null)
+    setCurrentSaveId(null); setCurrentSaveName(null)
   }, [])
 
   const handleEditorSave = useCallback((updated: Table, originalName: string | null) => {
@@ -1056,6 +1079,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   const handleOpen = useCallback((result: OpenResult) => {
     setHighlightTable(null); setSelectedTables(new Set()); setTagFilter(null); setActiveLayoutId(null)
     setFileHandle(result.fileHandle ?? null)
+    setCurrentSaveId(result.saveId ?? null)
+    setCurrentSaveName(result.saveName ?? null)
     // a JSON export's "All tables" entry is the master view's own positions,
     // not a real named layout — pull it back out before it's treated as one
     const allTablesLayout = result.schema.layouts?.find(l => l.name === 'All tables')
@@ -1068,7 +1093,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   }, [applySchema])
 
   if (!schema) {
-    return <UploadZone theme={theme} onThemeToggle={onThemeToggle} onOpen={handleOpen} />
+    return <UploadZone lang={lang} theme={theme} onThemeToggle={onThemeToggle} onOpen={handleOpen} />
   }
 
   return (
