@@ -946,13 +946,17 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     }
   }, [persistSessionNow])
 
-  // Save = write back to the open file handle if there is one; otherwise
-  // persist into the local saves list (utils/storage.ts) so it shows up in
-  // the main menu on next Exit — prompting for a name only the first time
-  // this session, then reusing that id/name on every later Save.
+  // Save = write back to the open file handle if there is one, AND always
+  // mirror into the local saves list (utils/storage.ts) so the project shows
+  // up in the main menu's "Recent projects" on next Exit — regardless of
+  // whether it's a fileless project or one opened from disk. Name comes from
+  // the file's own name when there's a handle (no prompt); otherwise it's
+  // asked once, the first Save of the session, then reused on every later
+  // Save via currentSaveId.
   const handleSave = useCallback(async () => {
     if (!schema) return
     const schemaOut = serializeSchema(schema)
+    let name = currentSaveName
 
     if (fileHandle) {
       const isSql  = fileHandle.name.endsWith('.sql')
@@ -979,21 +983,20 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
         )
         return
       }
-    } else {
-      let name = currentSaveName
-      if (!currentSaveId) {
-        const promptedName = await dialog.prompt(
-          lang === 'ru' ? 'Имя проекта' : 'Project name',
-          lang === 'ru' ? 'Введите имя для сохранения в списке проектов' : 'Enter a name to save this project under',
-          schema.tables[0]?.name ?? (lang === 'ru' ? 'Без названия' : 'Untitled')
-        )
-        if (promptedName === null) return
-        name = promptedName.trim() || (lang === 'ru' ? 'Без названия' : 'Untitled')
-      }
-      const entry = saveDB(name!, schemaOut, masterPositionsRef.current, currentSaveId ?? undefined)
-      setCurrentSaveId(entry.id)
-      setCurrentSaveName(entry.name)
+      name = name ?? fileHandle.name.replace(/\.[^.]+$/, '')
+    } else if (!currentSaveId) {
+      const promptedName = await dialog.prompt(
+        lang === 'ru' ? 'Имя проекта' : 'Project name',
+        lang === 'ru' ? 'Введите имя для сохранения в списке проектов' : 'Enter a name to save this project under',
+        schema.tables[0]?.name ?? (lang === 'ru' ? 'Без названия' : 'Untitled')
+      )
+      if (promptedName === null) return
+      name = promptedName.trim() || (lang === 'ru' ? 'Без названия' : 'Untitled')
     }
+
+    const entry = saveDB(name!, schemaOut, masterPositionsRef.current, currentSaveId ?? undefined)
+    setCurrentSaveId(entry.id)
+    setCurrentSaveName(entry.name)
 
     setSaveFlash(true)
     setTimeout(() => setSaveFlash(false), 1500)
