@@ -156,20 +156,12 @@
   position: relative;
 }
 
-.freezeOverlay {
+.freezeBanner {
   position: absolute;
-  inset: 0;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 30;
-  background: rgba(var(--bg-page-rgb), 0.55);
-  backdrop-filter: blur(2px) saturate(0.6);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 40px;
-  cursor: not-allowed;
-}
-
-.freezeMsg {
   padding: 12px 22px;
   border-radius: 12px;
   background: rgba(239, 68, 68, 0.14);
@@ -178,6 +170,7 @@
   font-size: 15px;
   font-weight: 700;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
 }
 
 /* ── Canvas toolbar ───────────────────────────────────────────────── */

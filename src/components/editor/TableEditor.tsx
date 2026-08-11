@@ -3,6 +3,7 @@ import type { Table, Column, Schema, TableType } from '../../types/schema'
 import { tableColor, tagColor } from '../../utils/colors'
 import { T, type Lang } from '../../i18n'
 import { useDialog } from '../../contexts/DialogContext'
+import { IDENT } from '../../utils/schemaDSL'
 import { FKPicker } from './FKPicker'
 import styles from './TableEditor.module.css'
 
@@ -113,6 +114,10 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
     if (pendingTag && !finalTags.includes(pendingTag)) finalTags.push(pendingTag)
 
     if (!trimmedName) { setNameError(t.tableName + ' required'); return }
+    if (!IDENT.test(trimmedName)) {
+      setNameError(lang === 'ru' ? 'Только латиница, цифры и _' : 'Latin letters, digits and _ only')
+      return
+    }
     const nameConflict = schema.tables.find(tb => tb.name === trimmedName && tb.name !== table?.name)
     if (nameConflict) { setNameError('Already exists'); return }
 

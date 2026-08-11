@@ -74,7 +74,11 @@ function NodesInitializedFitView({ rfRef }: {
 }
 
 function getRelType(table: Table, col: Column): '1:1' | '1:N' | 'N:M' {
-  if (col.unique) return '1:1'
+  // a primary key is inherently unique in every real database, even when
+  // the "unique" flag wasn't also (redundantly) ticked — without this, the
+  // most natural way to model a 1:1 (child.id PK+FK -> parent.id) rendered
+  // as 1:N instead, with no obvious way to fix it via the UI.
+  if (col.unique || col.primaryKey) return '1:1'
   const fkCols = table.columns.filter(c => c.foreignKey)
   if (fkCols.length >= 2 && fkCols.length >= table.columns.length - 1) return 'N:M'
   return '1:N'
@@ -1036,17 +1040,34 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     } else {
       const oldName = originalName
       const newName = updated.name
+      // detect a single renamed column (by name-set diff against the
+      // pre-edit table) so FKs from other tables pointing at the old column
+      // name get fixed up too — otherwise they keep pointing at a column
+      // that no longer exists and their edge just silently vanishes from
+      // the canvas (React Flow can't render an edge to a missing handle),
+      // with no warning unless the JSON/DSL panel happens to be open.
+      // Ambiguous with multiple simultaneous renames in one save, same
+      // one-change assumption the table-rename fixup below already makes.
+      const oldTable = schema.tables.find(tb => tb.name === oldName)
+      let colRename: { from: string; to: string } | null = null
+      if (oldTable) {
+        const oldNames = new Set(oldTable.columns.map(c => c.name))
+        const newNames = new Set(updated.columns.map(c => c.name))
+        const removed = [...oldNames].filter(n => !newNames.has(n))
+        const added = [...newNames].filter(n => !oldNames.has(n))
+        if (removed.length === 1 && added.length === 1) colRename = { from: removed[0], to: added[0] }
+      }
       newTables = schema.tables.map(tb => {
         if (tb.name === oldName) return updated
-        if (oldName !== newName) {
-          return {
-            ...tb,
-            columns: tb.columns.map(c =>
-              c.foreignKey?.table === oldName ? { ...c, foreignKey: { ...c.foreignKey, table: newName } } : c
-            ),
-          }
+        if (oldName === newName && !colRename) return tb
+        return {
+          ...tb,
+          columns: tb.columns.map(c => {
+            if (c.foreignKey?.table !== oldName) return c
+            const column = colRename && c.foreignKey.column === colRename.from ? colRename.to : c.foreignKey.column
+            return { ...c, foreignKey: { table: newName, column } }
+          }),
         }
-        return tb
       })
     }
     if (originalName && originalName !== updated.name) {
@@ -1413,12 +1434,13 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
               </ViewModeCtx.Provider>
               </ThemeCtx.Provider>
 
-              {/* Canvas frozen while the schema editor has errors */}
+              {/* Non-blocking notice while the schema editor has errors — the
+                  invalid draft never reaches `schema` (see SchemaEditor's
+                  commit()), so the canvas can't go out of sync with it; no
+                  need to block interaction with the canvas underneath. */}
               {splitView && !schemaValid && (
-                <div className={appStyles.freezeOverlay}>
-                  <div className={appStyles.freezeMsg}>
-                    ⚠ {lang === 'ru' ? 'Исправьте ошибки схемы в редакторе' : 'Fix schema errors in the editor'}
-                  </div>
+                <div className={appStyles.freezeBanner}>
+                  ⚠ {lang === 'ru' ? 'Исправьте ошибки схемы в редакторе' : 'Fix schema errors in the editor'}
                 </div>
               )}
             </div>
