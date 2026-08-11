@@ -1,6 +1,6 @@
 import type { Schema, Table, Column, Layout } from '../types/schema'
 
-const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
+export const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 // recognised column types (base name, before any length like varchar(255))
 const KNOWN_TYPES = new Set([
