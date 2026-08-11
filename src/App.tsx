@@ -1259,7 +1259,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
               className={`${appStyles.toolBtn} ${splitView ? appStyles.toolBtnActive : ''}`}
               title="Toggle JSON editor"
             >
-              <span style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 700 }}>{'{}'}</span>
+              <span style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 600 }}>{'{}'}</span>
               <span className={appStyles.toolBtnLabel}>JSON</span>
             </button>
           </div>

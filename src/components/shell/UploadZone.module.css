@@ -23,7 +23,7 @@
 
 .navLogo {
   color: var(--text-on-surface);
-  font-weight: 800;
+  font-weight: 700;
   font-size: 22px;
   letter-spacing: 0.5px;
 }
@@ -70,7 +70,7 @@
 
 .heading {
   color: var(--text-on-surface);
-  font-weight: 800;
+  font-weight: 700;
   font-size: 32px;
   margin: 0;
 }
@@ -142,7 +142,7 @@
   padding: 14px;
   border-radius: 14px;
   font-size: 16px;
-  font-weight: 700;
+  font-weight: 600;
   color: white;
   border: none;
   transition: background 0.15s;
@@ -197,7 +197,7 @@
 
 .saveCardName {
   color: var(--text-on-surface);
-  font-weight: 700;
+  font-weight: 600;
   font-size: 17px;
   flex: 1;
 }
@@ -219,7 +219,7 @@
   background: #ef4444;
   color: white;
   padding: 4px 8px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .saveTableTags {
@@ -231,7 +231,7 @@
 
 .saveTableTag {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   padding: 3px 9px;
   border-radius: 8px;
   /* background and color set via inline CSS vars */
@@ -260,7 +260,7 @@
 
 .openBtn {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 8px 20px;
   border-radius: 10px;
   background: #6366f1;

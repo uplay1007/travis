@@ -41,7 +41,7 @@
 
 .headerTitle {
   color: var(--text-on-surface);
-  font-weight: 700;
+  font-weight: 600;
   font-size: 18px;
 }
 
@@ -106,7 +106,7 @@
   border-radius: 12px;
   color: var(--text-muted);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   background: none;
   border: none;
   cursor: pointer;
@@ -124,7 +124,7 @@
   background: #4f46e5;
   color: white;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
   border: none;
   cursor: pointer;
   box-shadow: 0 10px 15px rgba(79, 70, 229, 0.2);
