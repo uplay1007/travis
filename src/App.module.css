@@ -32,7 +32,7 @@
 
 .topbarLogo {
   color: var(--text-on-surface);
-  font-weight: 900;
+  font-weight: 700;
   font-size: 20px;
   letter-spacing: -0.05em;
 }
@@ -44,7 +44,7 @@
   border: 1px solid rgba(var(--overlay-rgb), 0.1);
   font-size: 10px;
   color: #6b7280;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
@@ -84,7 +84,7 @@
   font-size: 15px;
   padding: 7px 18px;
   border-radius: 8px;
-  font-weight: 600;
+  font-weight: 500;
   color: white;
   border: none;
   cursor: pointer;
@@ -168,7 +168,7 @@
   border: 1px solid rgba(239, 68, 68, 0.5);
   color: #fca5a5;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   pointer-events: none;
 }
@@ -225,7 +225,7 @@
 
 .toolBtnLabel {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -367,7 +367,7 @@
   background: #6366f1;
   color: white;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
   box-shadow: 0 10px 30px rgba(99, 102, 241, 0.45);
   transition: filter 0.15s, transform 0.1s;
@@ -425,7 +425,7 @@
   background: transparent;
   color: var(--text-bright);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   text-align: left;
   transition: background 0.12s;
@@ -439,7 +439,7 @@
   border-radius: 8px;
   padding: 1px 8px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 /* ── Toast ────────────────────────────────────────────────────────── */
@@ -457,7 +457,7 @@
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.4);
   color: var(--text-bright);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.4;
   animation: toastIn 0.2s ease;
 }
@@ -499,7 +499,7 @@
 
 .layoutModalTitle {
   font-size: 17px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-on-surface);
 }
 
@@ -559,7 +559,7 @@
   background: none;
   color: #f87171;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -585,7 +585,7 @@
   background: #6366f1;
   color: white;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
   transition: filter 0.15s;
 }
@@ -679,7 +679,7 @@
   background: var(--accent, #6366f1);
   color: white;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -697,7 +697,7 @@
 
 .addTableCardName {
   color: white;
-  font-weight: 600;
+  font-weight: 500;
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -764,7 +764,7 @@
 
 .miniBadge {
   font-size: 8px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 1px 3px;
   border-radius: 3px;
   text-transform: uppercase;
@@ -784,7 +784,7 @@
 
 .groupsAllBtnActive {
   color: #818cf8;
-  font-weight: 700;
+  font-weight: 600;
   background: rgba(99, 102, 241, 0.05);
 }
 
@@ -815,7 +815,7 @@
 
 .groupsTagBtnActive {
   color: #818cf8;
-  font-weight: 700;
+  font-weight: 600;
   background: rgba(99, 102, 241, 0.05);
 }
 
@@ -849,7 +849,7 @@
   background: transparent;
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   outline: none;
   cursor: pointer;
   transition: color 0.15s;

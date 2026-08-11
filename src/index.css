@@ -53,6 +53,8 @@ html, body, #root {
   overflow: hidden;
   background: var(--bg-page);
   font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* React Flow overlays a draggable hitbox over the bounding box of a

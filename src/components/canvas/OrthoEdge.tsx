@@ -124,14 +124,14 @@ export function OrthoEdge({
       {relType && !edgeDimmed && (
         <>
           <text x={srcLabelX} y={srcLabelY} textAnchor="middle" dominantBaseline="middle"
-            fontSize={10} fontWeight={700} fontFamily="monospace"
+            fontSize={10} fontWeight={600} fontFamily="monospace"
             stroke={labelHalo} strokeWidth={3} paintOrder="stroke"
             fill={activeColor} opacity={edgeHighlighted ? 1 : 0.7}
             style={svgTextStyle}>
             {srcLabel}
           </text>
           <text x={endLabelX} y={endLabelY} textAnchor="middle" dominantBaseline="middle"
-            fontSize={10} fontWeight={700} fontFamily="monospace"
+            fontSize={10} fontWeight={600} fontFamily="monospace"
             stroke={labelHalo} strokeWidth={3} paintOrder="stroke"
             fill={activeColor} opacity={edgeHighlighted ? 1 : 0.7}
             style={svgTextStyle}>
@@ -154,7 +154,7 @@ export function OrthoEdge({
                 '--label-shadow': edgeHighlighted
                   ? `0 0 8px ${activeColor}66, 0 2px 8px rgba(0,0,0,0.6)`
                   : `0 2px 8px rgba(0,0,0,0.6)`,
-                '--label-weight': edgeHighlighted ? 700 : 400,
+                '--label-weight': edgeHighlighted ? 600 : 400,
               } as React.CSSProperties}
             >
               {label}
