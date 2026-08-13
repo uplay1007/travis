@@ -56,14 +56,25 @@ function ColumnRow({ col, accent, linked, hidden, referenced, showHandles }: {
       {/* per-column connection points: edges attach to the row that actually
           holds the FK / the referenced key, instead of a single node-wide dot.
           Only while expanded — when collapsed the handles move to the header
-          (see TableNode) so edges don't point into the hidden column area. */}
+          (see TableNode) so edges don't point into the hidden column area.
+          Two handles per role (left + right): which one an edge actually
+          uses is chosen per-edge in App.tsx based on the two tables' live
+          relative position, not fixed by role like it used to be. */}
       {showHandles && referenced && (
-        <Handle type="target" position={Position.Left} id={`col-${col.name}`}
-          style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
+        <>
+          <Handle type="target" position={Position.Left} id={`col-${col.name}-L`}
+            style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
+          <Handle type="target" position={Position.Right} id={`col-${col.name}-R`}
+            style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
+        </>
       )}
       {showHandles && col.foreignKey && (
-        <Handle type="source" position={Position.Right} id={`col-${col.name}`}
-          style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
+        <>
+          <Handle type="source" position={Position.Left} id={`col-${col.name}-L`}
+            style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
+          <Handle type="source" position={Position.Right} id={`col-${col.name}-R`}
+            style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
+        </>
       )}
       <span className={styles.colName}>{col.name}</span>
       <span className={styles.colType}>{col.type}</span>
@@ -133,20 +144,26 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
     : table.columns.length
 
   const handleHeaderClick = (e: React.MouseEvent) => {
-    // Alt+click and Cmd+click build their own selection group in the app
-    // state (see handleTableClick); keep both out of React Flow's native
-    // selection, which would otherwise fire its own 1-or-2-node selection
-    // change and flatten the FK-focus group down to just the clicked pair.
-    // Cmd (metaKey), not Ctrl: on macOS, Ctrl+click is intercepted as the
-    // native right-click/context-menu gesture before a click event fires.
-    if (e.altKey || e.metaKey) e.stopPropagation()
-    hl.onHighlight(table.name, { cmd: e.metaKey, alt: e.altKey })
+    // Alt+click and Cmd/Ctrl+click build their own selection group in the
+    // app state (see handleTableClick); keep both out of React Flow's
+    // native selection, which would otherwise fire its own 1-or-2-node
+    // selection change and flatten the FK-focus group down to just the
+    // clicked pair.
+    // Check both metaKey and ctrlKey: on macOS Ctrl+click is intercepted as
+    // the native right-click/context-menu gesture before a click event ever
+    // fires (so only metaKey/Cmd is reachable there), but on Windows
+    // Ctrl+click is a perfectly normal click with ctrlKey set — checking
+    // metaKey alone left Windows users' Ctrl+click falling through to React
+    // Flow's native single-select, collapsing whatever group was selected.
+    const toggle = e.metaKey || e.ctrlKey
+    if (e.altKey || toggle) e.stopPropagation()
+    hl.onHighlight(table.name, { cmd: toggle, alt: e.altKey })
   }
 
-  // Also stop the Alt/Cmd+mousedown so React Flow's drag/select handler
+  // Also stop the Alt/Cmd/Ctrl+mousedown so React Flow's drag/select handler
   // never selects the node (it selects on pointer-down, before the click fires).
   const handleHeaderMouseDown = (e: React.MouseEvent) => {
-    if (e.altKey || e.metaKey) e.stopPropagation()
+    if (e.altKey || e.metaKey || e.ctrlKey) e.stopPropagation()
   }
 
   const nodeClass = [
@@ -168,12 +185,20 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
         {!showColumns && table.columns.map(col => (
           <span key={`h-${col.name}`}>
             {referencedColumns.has(col.name) && (
-              <Handle type="target" position={Position.Left} id={`col-${col.name}`}
-                style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
+              <>
+                <Handle type="target" position={Position.Left} id={`col-${col.name}-L`}
+                  style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
+                <Handle type="target" position={Position.Right} id={`col-${col.name}-R`}
+                  style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
+              </>
             )}
             {col.foreignKey && (
-              <Handle type="source" position={Position.Right} id={`col-${col.name}`}
-                style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
+              <>
+                <Handle type="source" position={Position.Left} id={`col-${col.name}-L`}
+                  style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
+                <Handle type="source" position={Position.Right} id={`col-${col.name}-R`}
+                  style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
+              </>
             )}
           </span>
         ))}

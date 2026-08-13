@@ -136,6 +136,46 @@ function addedToLayoutMsg(layoutName: string, names: string[], lang: Lang): stri
   return lang === 'ru' ? `Добавлено в ${layoutName}: ${list}` : `Added to ${layoutName}: ${list}`
 }
 
+type EdgeSide = 'L' | 'R'
+interface TableRect { x: number; y: number; width: number }
+
+// Which side (left/right) each end of an FK edge should connect from, based
+// on the two tables' current horizontal placement — not a fixed
+// source=right/target=left rule, which routes badly the moment the tables
+// aren't simply arranged left-to-right on screen. `a`/`b` are the edge's two
+// endpoint tables in either order; the geometry itself is symmetric.
+//
+//   - one fully left of the other (no x-overlap)   -> connect via the sides
+//     facing each other (right of the left one, left of the right one)
+//   - overlapping, lower one sticks out to the left -> both connect on the left
+//   - overlapping, lower one sticks out to the right -> both connect on the right
+//   - lower one's span sits entirely inside the upper one's -> fall back to
+//     comparing centers
+function pickEdgeSides(a: TableRect, b: TableRect): { aSide: EdgeSide; bSide: EdgeSide } {
+  const lower = a.y >= b.y ? a : b
+  const upper = lower === a ? b : a
+  const lowerRight = lower.x + lower.width
+  const upperRight = upper.x + upper.width
+  const overlaps = lower.x < upperRight && upper.x < lowerRight
+
+  let lowerSide: EdgeSide
+  let upperSide: EdgeSide
+  if (!overlaps) {
+    if (lowerRight <= upper.x) { lowerSide = 'R'; upperSide = 'L' }
+    else { lowerSide = 'L'; upperSide = 'R' }
+  } else if (lower.x < upper.x) {
+    lowerSide = 'L'; upperSide = 'L'
+  } else if (lowerRight > upperRight) {
+    lowerSide = 'R'; upperSide = 'R'
+  } else {
+    const lowerCenter = lower.x + lower.width / 2
+    const upperCenter = upper.x + upper.width / 2
+    lowerSide = upperSide = lowerCenter < upperCenter ? 'L' : 'R'
+  }
+
+  return lower === a ? { aSide: lowerSide, bSide: upperSide } : { aSide: upperSide, bSide: lowerSide }
+}
+
 function schemaToFlow(
   schema: Schema,
   onEdit: (t: Table) => void,
@@ -193,8 +233,12 @@ function schemaToFlow(
       edges.push({
         id: key, source: table.name, target,
         type: 'fk',
-        sourceHandle: `col-${col.name}`,
-        targetHandle: `col-${col.foreignKey.column}`,
+        // default side (matches the old fixed source=right/target=left
+        // behavior) — displayEdges overrides this per-edge once node
+        // geometry is available, based on the two tables' actual relative
+        // position (see pickEdgeSides).
+        sourceHandle: `col-${col.name}-R`,
+        targetHandle: `col-${col.foreignKey.column}-L`,
         data: {
           label: `${col.name} → ${col.foreignKey.column}`,
           color: '#4b5563',
@@ -398,14 +442,33 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   }, [nodes, tagFilter, schema, activeLayout])
 
   const displayEdges = useMemo(() => {
+    let visibleEdges = edges
     if (activeLayout) {
       const visible = new Set(activeLayout.tables)
-      return edges.filter(e => visible.has(e.source) && visible.has(e.target))
+      visibleEdges = edges.filter(e => visible.has(e.source) && visible.has(e.target))
+    } else if (tagFilter && schema) {
+      const visibleNames = new Set(schema.tables.filter(t => t.tags?.includes(tagFilter)).map(t => t.name))
+      visibleEdges = edges.filter(e => visibleNames.has(e.source) && visibleNames.has(e.target))
     }
-    if (!tagFilter || !schema) return edges
-    const visibleNames = new Set(schema.tables.filter(t => t.tags?.includes(tagFilter)).map(t => t.name))
-    return edges.filter(e => visibleNames.has(e.source) && visibleNames.has(e.target))
-  }, [edges, tagFilter, schema, activeLayout])
+
+    // re-pick each edge's connection side against the tables' current
+    // positions (drag, layout switch, Organize, ...) — a fixed source=right/
+    // target=left pairing routes badly the moment tables aren't simply
+    // arranged left-to-right (see pickEdgeSides)
+    const rects = new Map<string, TableRect>()
+    for (const n of displayNodes) {
+      const width = (n.measured as { width?: number } | undefined)?.width ?? 280
+      rects.set(n.id, { x: n.position.x, y: n.position.y, width })
+    }
+    return visibleEdges.map(e => {
+      const src = rects.get(e.source)
+      const tgt = rects.get(e.target)
+      if (!src || !tgt) return e
+      const { aSide, bSide } = pickEdgeSides(src, tgt)
+      const { sourceColumn, targetColumn } = e.data as OrthoEdgeData
+      return { ...e, sourceHandle: `col-${sourceColumn}-${aSide}`, targetHandle: `col-${targetColumn}-${bSide}` }
+    })
+  }, [edges, tagFilter, schema, activeLayout, displayNodes])
 
   // React Flow's native selection (marquee, click, shift-click) is the single
   // source of truth. A multi-selection becomes the highlighted group; a single
@@ -436,9 +499,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // just it out of the group. React Flow keeps a clicked member selected on
   // its own (so the group stays draggable) and its mousedown handler is a
   // no-op for an already-selected member — so nodesRef still holds the whole
-  // group here. Cmd/Alt clicks are handled by React Flow / handleTableClick.
+  // group here. Cmd/Ctrl/Alt clicks are handled by React Flow / handleTableClick.
   const handleNodeClick = useCallback((e: React.MouseEvent, node: Node) => {
-    if (e.metaKey || e.altKey) return
+    if (e.metaKey || e.ctrlKey || e.altKey) return
     const selected = nodesRef.current.filter(n => n.selected)
     if (selected.length > 1 && selected.some(n => n.id === node.id)) {
       setNodes(nds => nds.map(n => n.id === node.id ? { ...n, selected: false } : n))
