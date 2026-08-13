@@ -1,12 +1,14 @@
-import React, { useState, useContext } from 'react'
+import React, { useState, useContext, useMemo } from 'react'
 import {
   getSmoothStepPath,
   EdgeLabelRenderer,
+  useNodes,
   type EdgeProps,
 } from '@xyflow/react'
 import { HighlightCtx } from '../../contexts/highlight'
 import { EdgeHoverCtx } from '../../contexts/edgeHover'
 import { ThemeCtx } from '../../contexts/theme'
+import { routeOrtho, pointsToPath, pathMidpoint, type Rect, type Side } from '../../utils/orthoRoute'
 import styles from './OrthoEdge.module.css'
 
 export interface OrthoEdgeData extends Record<string, unknown> {
@@ -66,11 +68,33 @@ export function OrthoEdge({
     ? (source === hl.focusTable ? sourceColor : targetColor) ?? color
     : color
 
-  const [edgePath, labelX, labelY] = getSmoothStepPath({
+  // Route around the other tables rather than straight through them. Every
+  // visible node except this edge's own two endpoints is an obstacle; the
+  // router falls back to the plain stepped path if it can't find a clear way.
+  const nodes = useNodes()
+  const [fallbackPath, fbLabelX, fbLabelY] = getSmoothStepPath({
     sourceX, sourceY, targetX, targetY,
     sourcePosition, targetPosition,
     borderRadius: 0,
   })
+
+  const [edgePath, labelX, labelY] = useMemo(() => {
+    const obstacles: Rect[] = []
+    for (const n of nodes) {
+      if (n.hidden || n.id === source || n.id === target) continue
+      const m = n.measured as { width?: number; height?: number } | undefined
+      if (!m?.width || !m?.height) continue
+      obstacles.push({ x: n.position.x, y: n.position.y, width: m.width, height: m.height })
+    }
+    const pts = routeOrtho(
+      { x: sourceX, y: sourceY }, sourcePosition as Side,
+      { x: targetX, y: targetY }, targetPosition as Side,
+      obstacles,
+    )
+    if (!pts) return [fallbackPath, fbLabelX, fbLabelY] as const
+    const mid = pathMidpoint(pts)
+    return [pointsToPath(pts), mid.x, mid.y] as const
+  }, [nodes, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, fallbackPath, fbLabelX, fbLabelY])
 
   const startDot = { x: sourceX, y: sourceY }
   const endDot   = { x: targetX, y: targetY }
