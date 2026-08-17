@@ -11,12 +11,7 @@ import styles from './TableNode.module.css'
 export interface TableNodeData extends Record<string, unknown> {
   table: Table
   onEdit: (table: Table) => void
-  // names of this table's columns that some other table's FK points at —
-  // used to attach a connection handle only where an edge actually lands
-  referencedColumns?: Set<string>
 }
-
-const EMPTY_SET = new Set<string>()
 
 export { MultiSelectCtx }
 
@@ -48,34 +43,11 @@ function Badge({ label, color }: { label: string; color: string }) {
   )
 }
 
-function ColumnRow({ col, accent, linked, hidden, referenced, showHandles }: {
-  col: Column; accent: string; linked: boolean; hidden: boolean; referenced: boolean; showHandles: boolean
+function ColumnRow({ col, accent, linked, hidden }: {
+  col: Column; accent: string; linked: boolean; hidden: boolean
 }) {
   return (
     <div className={`${styles.columnRow} ${linked ? styles.columnRowLinked : ''} ${hidden ? styles.columnRowHidden : ''}`}>
-      {/* per-column connection points: edges attach to the row that actually
-          holds the FK / the referenced key, instead of a single node-wide dot.
-          Only while expanded — when collapsed the handles move to the header
-          (see TableNode) so edges don't point into the hidden column area.
-          Two handles per role (left + right): which one an edge actually
-          uses is chosen per-edge in App.tsx based on the two tables' live
-          relative position, not fixed by role like it used to be. */}
-      {showHandles && referenced && (
-        <>
-          <Handle type="target" position={Position.Left} id={`col-${col.name}-L`}
-            style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
-          <Handle type="target" position={Position.Right} id={`col-${col.name}-R`}
-            style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
-        </>
-      )}
-      {showHandles && col.foreignKey && (
-        <>
-          <Handle type="source" position={Position.Left} id={`col-${col.name}-L`}
-            style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
-          <Handle type="source" position={Position.Right} id={`col-${col.name}-R`}
-            style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
-        </>
-      )}
       <span className={styles.colName}>{col.name}</span>
       <span className={styles.colType}>{col.type}</span>
       <div className={styles.badges}>
@@ -89,7 +61,7 @@ function ColumnRow({ col, accent, linked, hidden, referenced, showHandles }: {
 }
 
 export const TableNode = memo(({ data, selected }: NodeProps) => {
-  const { table, onEdit, referencedColumns = EMPTY_SET } = data as TableNodeData
+  const { table, onEdit } = data as TableNodeData
   const [expanded, setExpanded] = useState(true)
   const multiSelectActive = useContext(MultiSelectCtx)
   const hl = useContext(HighlightCtx)
@@ -107,10 +79,10 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
     }
   }, [bulkKey, bulkExpand])
 
-  // When the table folds/unfolds the connection handles move between the
-  // column rows and the header, so React Flow has to re-measure them (once now
-  // and once after the 0.28s open/close animation settles) or the edges keep
-  // pointing at the handles' old positions.
+  // The left/right connection handles sit vertically centered on the node's
+  // current height, which changes when the table folds/unfolds — React Flow
+  // has to re-measure them (once now and once after the 0.28s open/close
+  // animation settles) or edges keep aiming at the old center.
   useEffect(() => {
     if (!nodeId) return
     updateNodeInternals(nodeId)
@@ -182,29 +154,25 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
       className={nodeClass}
       style={{ '--accent': accent, '--accent-glow': `${accent}55`, '--accent-glow2': `${accent}44` } as React.CSSProperties}
     >
+      {/* One generic connection point per side of the whole card, not per
+          column — App.tsx picks whichever side of each table an edge should
+          use (whichever pair is closest, see pickBestSides) and fans out
+          multiple edges sharing one side, then hands down the exact draw
+          point via edge data (see OrthoEdge); these handles only need to
+          exist so React Flow's own bookkeeping resolves a valid connection,
+          their on-screen position never actually determines where a line is
+          drawn. Always present regardless of expand/collapse — anchored to
+          the outer card, not to a row that might be hidden. */}
+      <Handle type="target" position={Position.Top} id="top" style={{ opacity: 0, width: 8, height: 8 }} />
+      <Handle type="source" position={Position.Top} id="top" style={{ opacity: 0, width: 8, height: 8 }} />
+      <Handle type="target" position={Position.Bottom} id="bottom" style={{ opacity: 0, width: 8, height: 8 }} />
+      <Handle type="source" position={Position.Bottom} id="bottom" style={{ opacity: 0, width: 8, height: 8 }} />
+      <Handle type="target" position={Position.Left} id="left" style={{ opacity: 0, width: 8, height: 8 }} />
+      <Handle type="source" position={Position.Left} id="left" style={{ opacity: 0, width: 8, height: 8 }} />
+      <Handle type="target" position={Position.Right} id="right" style={{ opacity: 0, width: 8, height: 8 }} />
+      <Handle type="source" position={Position.Right} id="right" style={{ opacity: 0, width: 8, height: 8 }} />
+
       <div className={styles.header} onClick={handleHeaderClick} onMouseDown={handleHeaderMouseDown}>
-        {/* When collapsed, all connection points live on the header so edges
-            anchor to the header instead of the now-hidden column rows. */}
-        {!showColumns && table.columns.map(col => (
-          <span key={`h-${col.name}`}>
-            {referencedColumns.has(col.name) && (
-              <>
-                <Handle type="target" position={Position.Left} id={`col-${col.name}-L`}
-                  style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
-                <Handle type="target" position={Position.Right} id={`col-${col.name}-R`}
-                  style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
-              </>
-            )}
-            {col.foreignKey && (
-              <>
-                <Handle type="source" position={Position.Left} id={`col-${col.name}-L`}
-                  style={{ opacity: 0, width: 8, height: 8, left: -4, top: '50%' }} />
-                <Handle type="source" position={Position.Right} id={`col-${col.name}-R`}
-                  style={{ opacity: 0, width: 8, height: 8, right: -4, top: '50%' }} />
-              </>
-            )}
-          </span>
-        ))}
         <span className={styles.headerName}>{table.name}</span>
         <div className={styles.headerRight}>
           {table.type ? (
@@ -249,8 +217,6 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
                 accent={accent}
                 linked={col.name === linkedCol}
                 hidden={isCompactHidden(col)}
-                referenced={referencedColumns.has(col.name)}
-                showHandles={showColumns}
               />
             ))}
           </div>

@@ -30,6 +30,7 @@ import { EdgeHoverCtx, type EdgeEndpoint } from './contexts/edgeHover'
 import { ViewModeCtx, type ViewMode, type ViewModeCtxValue } from './contexts/viewMode'
 import { ThemeCtx } from './contexts/theme'
 import { OrthoEdge, type OrthoEdgeData } from './components/canvas/OrthoEdge'
+import type { Side } from './utils/orthoRoute'
 import { computeELKLayout } from './services/layoutService'
 import { resolveOverlaps, type Rect } from './utils/separateNodes'
 import { TableEditor } from './components/editor/TableEditor'
@@ -141,57 +142,144 @@ function addedToLayoutMsg(layoutName: string, names: string[], lang: Lang): stri
 // on every call
 const EMPTY_TAG_SET: ReadonlySet<string> = new Set()
 
-type EdgeSide = 'L' | 'R'
-interface TableRect { x: number; y: number; width: number }
+interface TableRect { x: number; y: number; width: number; height: number }
 
-// Below this horizontal gap, routeOrtho's obstacle clearance (MARGIN=14 each
-// side, ESCAPE=60 outer ring — see utils/orthoRoute.ts) doesn't leave a clean
-// face-to-face channel between the two tables, so the route ends up hugging
-// one of their borders instead of passing cleanly between them.
+// Below this gap, routeOrtho's obstacle clearance (MARGIN=14 each side,
+// ESCAPE=60 outer ring — see utils/orthoRoute.ts) doesn't leave a clean
+// corridor between the two tables, so a route facing straight across that
+// gap ends up hugging one of their borders instead of passing cleanly
+// between them.
 const SIDE_GAP_CLEARANCE = 60
 
-// Which side (left/right) each end of an FK edge should connect from, based
-// on the two tables' current horizontal placement — not a fixed
-// source=right/target=left rule, which routes badly the moment the tables
-// aren't simply arranged left-to-right on screen. `a`/`b` are the edge's two
-// endpoint tables in either order; the geometry itself is symmetric.
-//
-//   - one fully left of the other, with enough of a gap for a clean channel
-//     -> connect via the sides facing each other (right of the left one,
-//        left of the right one)
-//   - overlapping (or too close for a clean channel — see SIDE_GAP_CLEARANCE),
-//     lower one sticks out to the left  -> both connect on the left
-//   - overlapping (or too close), lower one sticks out to the right
-//     -> both connect on the right
-//   - lower one's span sits entirely inside the upper one's -> fall back to
-//     comparing centers
-function pickEdgeSides(a: TableRect, b: TableRect): { aSide: EdgeSide; bSide: EdgeSide } {
-  const lower = a.y >= b.y ? a : b
-  const upper = lower === a ? b : a
-  const lowerRight = lower.x + lower.width
-  const upperRight = upper.x + upper.width
-  // inflating one side by the clearance before testing intersection treats a
-  // too-narrow gap the same as a true overlap, routing both ends around one
-  // shared side instead of threading the router through a gap it can't keep
-  // clear of both borders at once
-  const overlaps = lower.x < upperRight + SIDE_GAP_CLEARANCE && upper.x < lowerRight + SIDE_GAP_CLEARANCE
+const SIDES: readonly Side[] = ['top', 'bottom', 'left', 'right']
 
-  let lowerSide: EdgeSide
-  let upperSide: EdgeSide
-  if (!overlaps) {
-    if (lowerRight <= upper.x) { lowerSide = 'R'; upperSide = 'L' }
-    else { lowerSide = 'L'; upperSide = 'R' }
-  } else if (lower.x < upper.x) {
-    lowerSide = 'L'; upperSide = 'L'
-  } else if (lowerRight > upperRight) {
-    lowerSide = 'R'; upperSide = 'R'
-  } else {
-    const lowerCenter = lower.x + lower.width / 2
-    const upperCenter = upper.x + upper.width / 2
-    lowerSide = upperSide = lowerCenter < upperCenter ? 'L' : 'R'
+// The point where a connection touches a given side of a table's box —
+// always that side's midpoint. Exactly where along the side an edge is
+// actually drawn is decided later, once every edge sharing that side is
+// known (see fanOutSideAnchors below).
+function sideMidpoint(r: TableRect, side: Side): { x: number; y: number } {
+  switch (side) {
+    case 'top': return { x: r.x + r.width / 2, y: r.y }
+    case 'bottom': return { x: r.x + r.width / 2, y: r.y + r.height }
+    case 'left': return { x: r.x, y: r.y + r.height / 2 }
+    case 'right': return { x: r.x + r.width, y: r.y + r.height / 2 }
+  }
+}
+
+// The gap between two tables when sideA/sideB face each other directly
+// across a straight corridor (a right→left pair, or a top→bottom pair) —
+// null for any other combination, since those don't share a corridor at all.
+function facingGap(a: TableRect, b: TableRect, sideA: Side, sideB: Side): number | null {
+  if (sideA === 'right' && sideB === 'left') return b.x - (a.x + a.width)
+  if (sideA === 'left' && sideB === 'right') return a.x - (b.x + b.width)
+  if (sideA === 'bottom' && sideB === 'top') return b.y - (a.y + a.height)
+  if (sideA === 'top' && sideB === 'bottom') return a.y - (b.y + b.height)
+  return null
+}
+
+// Which side of each table an FK edge should connect to — picked purely by
+// distance, like a straight ruler between the two boxes: try every one of
+// the 4×4 side combinations and keep whichever pair of side-midpoints ends
+// up closest together. Inspired by the open-source erd-editor VS Code
+// extension's relationship anchoring (see the roadmap doc) — it ignores
+// which specific column an edge represents when picking a side, same as
+// here; exactly which column an edge is still shows in its hover label, it's
+// just no longer where the dot physically sits.
+//
+// A facing pair (right→left, top→bottom) closer than SIDE_GAP_CLEARANCE is
+// disqualified even when it's the shortest distance on paper — the router
+// can't keep clear of both borders through a corridor that narrow, so a
+// straight shot across a near-touching gap is exactly the case that used to
+// clip a table's edge (see the routing gotcha in the roadmap doc).
+function pickBestSides(a: TableRect, b: TableRect): { aSide: Side; bSide: Side } {
+  let best: { aSide: Side; bSide: Side } = { aSide: 'right', bSide: 'left' }
+  let bestDist = Infinity
+  for (const aSide of SIDES) {
+    for (const bSide of SIDES) {
+      const gap = facingGap(a, b, aSide, bSide)
+      if (gap !== null && gap < SIDE_GAP_CLEARANCE) continue
+      const pa = sideMidpoint(a, aSide)
+      const pb = sideMidpoint(b, bSide)
+      const dist = Math.hypot(pa.x - pb.x, pa.y - pb.y)
+      if (dist < bestDist) { bestDist = dist; best = { aSide, bSide } }
+    }
+  }
+  return best
+}
+
+interface EdgeAnchors {
+  sourcePoint: { x: number; y: number }
+  targetPoint: { x: number; y: number }
+  sourceSide: Side
+  targetSide: Side
+}
+
+// Spreads multiple edges that land on the same side of the same table along
+// that side (evenly, like slats in a blind) instead of bunching them at one
+// point — and orders them by where each edge's OTHER end sits, so parallel
+// lines fan out in the same order they'll eventually run rather than
+// crossing right next to the shared table. Same idea as erd-editor's
+// relationship-overlay sort.
+function fanOutSideAnchors(
+  edgeEndpoints: { id: string; sourceId: string; targetId: string }[],
+  rects: Map<string, TableRect>,
+): Map<string, EdgeAnchors> {
+  const sides = new Map<string, { aSide: Side; bSide: Side }>()
+  for (const e of edgeEndpoints) {
+    const a = rects.get(e.sourceId)
+    const b = rects.get(e.targetId)
+    if (a && b) sides.set(e.id, pickBestSides(a, b))
   }
 
-  return lower === a ? { aSide: lowerSide, bSide: upperSide } : { aSide: upperSide, bSide: lowerSide }
+  // group every edge-endpoint by which (table, side) it lands on, keeping
+  // the far endpoint's un-fanned-out midpoint for ordering
+  type Slot = { edgeId: string; end: 'source' | 'target'; otherMid: { x: number; y: number } }
+  const groups = new Map<string, Slot[]>()
+  const addSlot = (tableId: string, side: Side, slot: Slot) => {
+    const key = `${tableId}::${side}`
+    const list = groups.get(key)
+    if (list) list.push(slot)
+    else groups.set(key, [slot])
+  }
+  for (const e of edgeEndpoints) {
+    const pick = sides.get(e.id)
+    const a = rects.get(e.sourceId)
+    const b = rects.get(e.targetId)
+    if (!pick || !a || !b) continue
+    addSlot(e.sourceId, pick.aSide, { edgeId: e.id, end: 'source', otherMid: sideMidpoint(b, pick.bSide) })
+    addSlot(e.targetId, pick.bSide, { edgeId: e.id, end: 'target', otherMid: sideMidpoint(a, pick.aSide) })
+  }
+
+  // for each (table, side) group, spread its slots evenly across that side
+  // (never touching the corners), ordered by the other end's position along
+  // the axis being spread
+  const points = new Map<string, { x: number; y: number }>() // key: `${edgeId}::${end}`
+  for (const [key, slots] of groups) {
+    const sepIdx = key.lastIndexOf('::')
+    const tableId = key.slice(0, sepIdx)
+    const side = key.slice(sepIdx + 2) as Side
+    const r = rects.get(tableId)
+    if (!r) continue
+    const vertical = side === 'left' || side === 'right'
+    slots.sort((s1, s2) => vertical ? s1.otherMid.y - s2.otherMid.y : s1.otherMid.x - s2.otherMid.x)
+    const n = slots.length
+    slots.forEach((slot, i) => {
+      const t = (i + 1) / (n + 1)
+      const x = vertical ? (side === 'left' ? r.x : r.x + r.width) : r.x + r.width * t
+      const y = vertical ? r.y + r.height * t : (side === 'top' ? r.y : r.y + r.height)
+      points.set(`${slot.edgeId}::${slot.end}`, { x, y })
+    })
+  }
+
+  const result = new Map<string, EdgeAnchors>()
+  for (const e of edgeEndpoints) {
+    const pick = sides.get(e.id)
+    const sourcePoint = points.get(`${e.id}::source`)
+    const targetPoint = points.get(`${e.id}::target`)
+    if (!pick || !sourcePoint || !targetPoint) continue
+    result.set(e.id, { sourcePoint, targetPoint, sourceSide: pick.aSide, targetSide: pick.bSide })
+  }
+  return result
 }
 
 function schemaToFlow(
@@ -212,18 +300,6 @@ function schemaToFlow(
       )
     : {}
 
-  // columns that some other table's FK points at — each becomes a dedicated
-  // connection point instead of every edge bunching at the node's one dot
-  const referencedColumns = new Map<string, Set<string>>()
-  for (const table of schema.tables) {
-    for (const col of table.columns) {
-      if (!col.foreignKey || col.foreignKey.table === table.name) continue
-      const set = referencedColumns.get(col.foreignKey.table) ?? new Set<string>()
-      set.add(col.foreignKey.column)
-      referencedColumns.set(col.foreignKey.table, set)
-    }
-  }
-
   const nodes: Node[] = schema.tables.map(table => ({
     id: table.name,
     type: 'table',
@@ -232,7 +308,7 @@ function schemaToFlow(
       savedPositions?.[table.name] ??
       layoutMap[table.name] ??
       { x: 0, y: 0 },
-    data: { table, onEdit, referencedColumns: referencedColumns.get(table.name) } satisfies TableNodeData,
+    data: { table, onEdit } satisfies TableNodeData,
   }))
 
   const tableMap = new Map(schema.tables.map(t => [t.name, t]))
@@ -251,12 +327,11 @@ function schemaToFlow(
       edges.push({
         id: key, source: table.name, target,
         type: 'fk',
-        // default side (matches the old fixed source=right/target=left
-        // behavior) — displayEdges overrides this per-edge once node
-        // geometry is available, based on the two tables' actual relative
-        // position (see pickEdgeSides).
-        sourceHandle: `col-${col.name}-R`,
-        targetHandle: `col-${col.foreignKey.column}-L`,
+        // placeholder side — displayEdges overrides this per-edge once node
+        // geometry is available, based on the two tables' actual positions
+        // (see pickBestSides/fanOutSideAnchors).
+        sourceHandle: 'right',
+        targetHandle: 'left',
         data: {
           label: `${col.name} → ${col.foreignKey.column}`,
           color: '#4b5563',
@@ -497,22 +572,33 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       visibleEdges = visibleEdges.filter(e => !currentHidden.has(e.source) && !currentHidden.has(e.target))
     }
 
-    // re-pick each edge's connection side against the tables' current
-    // positions (drag, layout switch, Organize, ...) — a fixed source=right/
-    // target=left pairing routes badly the moment tables aren't simply
-    // arranged left-to-right (see pickEdgeSides)
+    // re-pick each edge's connection side and exact anchor point against the
+    // tables' current positions (drag, layout switch, Organize, ...) — see
+    // pickBestSides/fanOutSideAnchors
     const rects = new Map<string, TableRect>()
     for (const n of displayNodes) {
-      const width = (n.measured as { width?: number } | undefined)?.width ?? 280
-      rects.set(n.id, { x: n.position.x, y: n.position.y, width })
+      const m = n.measured as { width?: number; height?: number } | undefined
+      rects.set(n.id, { x: n.position.x, y: n.position.y, width: m?.width ?? 280, height: m?.height ?? 120 })
     }
+    const anchors = fanOutSideAnchors(
+      visibleEdges.map(e => ({ id: e.id, sourceId: e.source, targetId: e.target })),
+      rects,
+    )
     return visibleEdges.map(e => {
-      const src = rects.get(e.source)
-      const tgt = rects.get(e.target)
-      if (!src || !tgt) return e
-      const { aSide, bSide } = pickEdgeSides(src, tgt)
-      const { sourceColumn, targetColumn } = e.data as OrthoEdgeData
-      return { ...e, sourceHandle: `col-${sourceColumn}-${aSide}`, targetHandle: `col-${targetColumn}-${bSide}` }
+      const a = anchors.get(e.id)
+      if (!a) return e
+      return {
+        ...e,
+        sourceHandle: a.sourceSide,
+        targetHandle: a.targetSide,
+        data: {
+          ...(e.data as OrthoEdgeData),
+          sourcePoint: a.sourcePoint,
+          targetPoint: a.targetPoint,
+          sourceSide: a.sourceSide,
+          targetSide: a.targetSide,
+        } satisfies OrthoEdgeData,
+      }
     })
   }, [edges, scopedVisibleNames, currentHidden, displayNodes])
 

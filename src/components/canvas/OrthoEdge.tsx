@@ -3,6 +3,7 @@ import {
   getSmoothStepPath,
   EdgeLabelRenderer,
   useNodes,
+  Position,
   type EdgeProps,
 } from '@xyflow/react'
 import { HighlightCtx } from '../../contexts/highlight'
@@ -19,6 +20,16 @@ export interface OrthoEdgeData extends Record<string, unknown> {
   targetColor?: string
   sourceColumn?: string
   targetColumn?: string
+  // Exact anchor point + side to draw from/to, computed centrally in App.tsx
+  // (pickBestSides/fanOutSideAnchors) from the two tables' current boxes —
+  // not resolved from a per-column React Flow Handle position, since a
+  // table now exposes one generic handle per side rather than one per
+  // column (see TableNode). Falls back to the props React Flow derives from
+  // that generic handle before the first recompute lands.
+  sourcePoint?: { x: number; y: number }
+  targetPoint?: { x: number; y: number }
+  sourceSide?: Side
+  targetSide?: Side
 }
 
 const LABEL_OFF = 24
@@ -36,7 +47,10 @@ export function OrthoEdge({
   data,
 }: EdgeProps) {
   const [hovered, setHovered] = useState(false)
-  const { label, color, relType, sourceColor, targetColor, sourceColumn, targetColumn } = (data ?? {}) as OrthoEdgeData
+  const {
+    label, color, relType, sourceColor, targetColor, sourceColumn, targetColumn,
+    sourcePoint, targetPoint, sourceSide, targetSide,
+  } = (data ?? {}) as OrthoEdgeData
   const hl = useContext(HighlightCtx)
   const edgeHover = useContext(EdgeHoverCtx)
   const theme = useContext(ThemeCtx)
@@ -68,13 +82,23 @@ export function OrthoEdge({
     ? (source === hl.focusTable ? sourceColor : targetColor) ?? color
     : color
 
+  // The actual draw points/sides: App.tsx computes these centrally (picking
+  // whichever of the 4 sides per table is closest, then fanning out
+  // multiple edges sharing a side) and hands them down via data — the props
+  // React Flow derives from the generic per-side Handle are only a
+  // placeholder for the brief window before that first recompute lands.
+  const startDot = sourcePoint ?? { x: sourceX, y: sourceY }
+  const endDot = targetPoint ?? { x: targetX, y: targetY }
+  const startSide = (sourceSide ?? sourcePosition) as Side
+  const endSide = (targetSide ?? targetPosition) as Side
+
   // Route around the other tables rather than straight through them. Every
   // visible node except this edge's own two endpoints is an obstacle; the
   // router falls back to the plain stepped path if it can't find a clear way.
   const nodes = useNodes()
   const [fallbackPath, fbLabelX, fbLabelY] = getSmoothStepPath({
-    sourceX, sourceY, targetX, targetY,
-    sourcePosition, targetPosition,
+    sourceX: startDot.x, sourceY: startDot.y, targetX: endDot.x, targetY: endDot.y,
+    sourcePosition: startSide as unknown as Position, targetPosition: endSide as unknown as Position,
     borderRadius: 0,
   })
 
@@ -86,20 +110,14 @@ export function OrthoEdge({
       if (!m?.width || !m?.height) continue
       obstacles.push({ x: n.position.x, y: n.position.y, width: m.width, height: m.height })
     }
-    const pts = routeOrtho(
-      { x: sourceX, y: sourceY }, sourcePosition as Side,
-      { x: targetX, y: targetY }, targetPosition as Side,
-      obstacles,
-    )
+    const pts = routeOrtho(startDot, startSide, endDot, endSide, obstacles)
     if (!pts) return [fallbackPath, fbLabelX, fbLabelY] as const
     const mid = pathMidpoint(pts)
     return [pointsToPath(pts), mid.x, mid.y] as const
-  }, [nodes, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, fallbackPath, fbLabelX, fbLabelY])
+  }, [nodes, source, target, startDot, startSide, endDot, endSide, fallbackPath, fbLabelX, fbLabelY])
 
-  const startDot = { x: sourceX, y: sourceY }
-  const endDot   = { x: targetX, y: targetY }
-  const sd = POS_DIR[sourcePosition] ?? { dx: 1, dy: 0 }
-  const td = POS_DIR[targetPosition] ?? { dx: -1, dy: 0 }
+  const sd = POS_DIR[startSide] ?? { dx: 1, dy: 0 }
+  const td = POS_DIR[endSide] ?? { dx: -1, dy: 0 }
   const srcLabelX = startDot.x + sd.dx * LABEL_OFF
   const srcLabelY = startDot.y + sd.dy * LABEL_OFF
   const endLabelX = endDot.x + td.dx * LABEL_OFF
