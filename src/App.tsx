@@ -547,7 +547,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // no-op for an already-selected member — so nodesRef still holds the whole
   // group here. Cmd/Ctrl/Alt clicks are handled by React Flow / handleTableClick.
   const handleNodeClick = useCallback((e: React.MouseEvent, node: Node) => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
     const selected = nodesRef.current.filter(n => n.selected)
     if (selected.length > 1 && selected.some(n => n.id === node.id)) {
       setNodes(nds => nds.map(n => n.id === node.id ? { ...n, selected: false } : n))
@@ -675,7 +675,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // state instead — both are kept out of React Flow's native selection (see
   // TableNode's handleHeaderClick) so they don't get flattened into whatever
   // 1-or-2-node set React Flow happens to have selected.
-  const handleTableClick = useCallback((name: string, mods: { cmd: boolean; alt: boolean }) => {
+  const handleTableClick = useCallback((name: string, mods: { cmd: boolean; alt: boolean; shift: boolean }) => {
     if (mods.cmd) {
       // Toggle exactly the clicked table's membership in the current group —
       // never its own neighbours. The first cmd-click seeds the group from
@@ -689,6 +689,18 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
         else next.add(name)
         return next
       })
+      return
+    }
+    if (mods.shift) {
+      // Promote this table's FK-neighbourhood — the same set a plain click
+      // already lights up for visual context — into a real selectedTables
+      // group (groupMode: true), so it becomes an explicit, draggable-
+      // together group (see handleNodeDragStart/handleNodeDrag's groupMode
+      // gate). Sets the group outright rather than toggling like Cmd does —
+      // one shift-click grabs "this whole connected cluster".
+      if (!schema) return
+      setHighlightTable(null)
+      setSelectedTables(fkNeighborhood(schema.tables, name))
       return
     }
     if (!mods.alt || !schema) return

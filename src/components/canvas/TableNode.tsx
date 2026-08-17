@@ -144,9 +144,9 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
     : table.columns.length
 
   const handleHeaderClick = (e: React.MouseEvent) => {
-    // Alt+click and Cmd/Ctrl+click build their own selection group in the
-    // app state (see handleTableClick); keep both out of React Flow's
-    // native selection, which would otherwise fire its own 1-or-2-node
+    // Alt+click, Cmd/Ctrl+click and Shift+click all build their own selection
+    // group in the app state (see handleTableClick); keep them out of React
+    // Flow's native selection, which would otherwise fire its own 1-or-2-node
     // selection change and flatten the FK-focus group down to just the
     // clicked pair.
     // Check both metaKey and ctrlKey: on macOS Ctrl+click is intercepted as
@@ -156,14 +156,17 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
     // metaKey alone left Windows users' Ctrl+click falling through to React
     // Flow's native single-select, collapsing whatever group was selected.
     const toggle = e.metaKey || e.ctrlKey
-    if (e.altKey || toggle) e.stopPropagation()
-    hl.onHighlight(table.name, { cmd: toggle, alt: e.altKey })
+    if (e.altKey || toggle || e.shiftKey) e.stopPropagation()
+    hl.onHighlight(table.name, { cmd: toggle, alt: e.altKey, shift: e.shiftKey })
   }
 
-  // Also stop the Alt/Cmd/Ctrl+mousedown so React Flow's drag/select handler
-  // never selects the node (it selects on pointer-down, before the click fires).
+  // Also stop the Alt/Cmd/Ctrl/Shift+mousedown so React Flow's drag/select
+  // handler never selects the node (it selects on pointer-down, before the
+  // click fires) — Shift in particular is React Flow's own
+  // multiSelectionKeyCode, which knows nothing about FK relationships and
+  // would otherwise just toggle this one node into its native selection.
   const handleHeaderMouseDown = (e: React.MouseEvent) => {
-    if (e.altKey || e.metaKey || e.ctrlKey) e.stopPropagation()
+    if (e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) e.stopPropagation()
   }
 
   const nodeClass = [
