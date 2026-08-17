@@ -795,21 +795,28 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
 
   const groupDragOrigins = useRef<Record<string, { x: number; y: number }>>({})
 
+  // Group-dragging only kicks in for an EXPLICIT multi-select (Cmd-click,
+  // Alt-click, marquee — highlightCtxValue.groupMode / selectedTables), never
+  // for the passive FK-neighbourhood highlight a plain single click lights up
+  // (highlighted still includes those neighbours then, but groupMode is
+  // false). Gating on `highlighted` alone used to mean grabbing a table that
+  // merely had lit-up neighbours dragged them all along with it — a plain
+  // click was supposed to move only the one table you grabbed.
   const handleNodeDragStart = useCallback((_e: MouseEvent | TouchEvent, node: Node) => {
-    if (!highlightCtxValue.highlighted.has(node.id)) return
+    if (!highlightCtxValue.groupMode || !highlightCtxValue.highlighted.has(node.id)) return
     groupDragOrigins.current = Object.fromEntries(
       nodes
         .filter(n => highlightCtxValue.highlighted.has(n.id))
         .map(n => [n.id, resolvedPosition(n)])
     )
-  }, [highlightCtxValue.highlighted, nodes, resolvedPosition])
+  }, [highlightCtxValue.groupMode, highlightCtxValue.highlighted, nodes, resolvedPosition])
 
   const handleNodeDrag = useCallback((_e: MouseEvent | TouchEvent, node: Node) => {
-    const isHighlighted = highlightCtxValue.highlighted.has(node.id)
+    const isGroupDrag = highlightCtxValue.groupMode && highlightCtxValue.highlighted.has(node.id)
 
     persistPos(node.id, { x: node.position.x, y: node.position.y })
 
-    if (!isHighlighted) return
+    if (!isGroupDrag) return
     const origin = groupDragOrigins.current[node.id]
     if (!origin) return
     const dx = node.position.x - origin.x
@@ -823,7 +830,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       persistPos(n.id, newPos)
       return { ...n, position: newPos }
     }))
-  }, [highlightCtxValue.highlighted, setNodes, persistPos])
+  }, [highlightCtxValue.groupMode, highlightCtxValue.highlighted, setNodes, persistPos])
 
   const handleNodeDragStop = useCallback((_e: MouseEvent | TouchEvent, node: Node) => {
     const current = nodesRef.current

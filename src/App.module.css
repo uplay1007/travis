@@ -12,25 +12,26 @@
 .topbar {
   position: relative;
   z-index: 20;
-  height: 58px;
+  min-height: 58px;
   background: var(--bg-panel);
   border-bottom: 1px solid rgba(var(--overlay-rgb), 0.08);
   display: flex;
   align-items: center;
-  padding: 0 20px;
-  gap: 32px;
+  padding: 8px 20px;
+  gap: 12px 32px;
   flex-shrink: 0;
   zoom: 1;
   /* On a narrower browser window (a non-maximized window, a smaller laptop
      panel, or Windows' 125–150% OS display scaling shrinking the effective
      CSS viewport) the toolbar's total content is wider than the window. With
-     no wrap and overflow clipped up the tree at html/body, the tail end of
-     the bar (Organize, JSON toggle, exports, Save) simply became invisible
-     with no way to reach it. Scrolling keeps every control reachable instead
-     of silently disappearing. */
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
+     no wrap, the tail end of the bar (Organize, JSON toggle, exports, Save)
+     simply became invisible with no way to reach it. Wrapping onto a second
+     line keeps every control reachable — NOT overflow-x/y:auto (tried that
+     first): the Groups/Layouts dropdowns are position:absolute children that
+     deliberately extend below the bar's own box, and any overflow value
+     other than visible on .topbar clips (or scroll-traps) them completely,
+     see gotcha in the roadmap doc. flex-wrap keeps overflow: visible. */
+  flex-wrap: wrap;
 }
 
 .topbarBrand {
