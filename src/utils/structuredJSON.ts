@@ -19,7 +19,7 @@ export interface StructuredTable {
 }
 export interface StructuredLayout {
   name: string
-  parameters: { view: 'full' | 'compact' | 'collapsed' }
+  parameters: { view: 'full' | 'compact' | 'collapsed'; locked?: boolean }
   positions: Record<string, { x: number; y: number }>
 }
 export interface StructuredGroup {
@@ -78,7 +78,7 @@ export function schemaToStructured(schema: Schema, masterPositions: Record<strin
     { name: 'All tables', parameters: { view: 'full' }, positions: filterPositions(masterPositions) },
     ...(schema.layouts ?? []).map(l => ({
       name: l.name,
-      parameters: { view: l.viewMode ?? 'full' },
+      parameters: { view: l.viewMode ?? 'full', ...(l.locked ? { locked: true } : {}) },
       positions: filterPositions(l.positions, new Set(l.tables)),
     })),
   ]
@@ -143,6 +143,7 @@ export function structuredToSchema(raw: StructuredSchema): Schema {
     tables: Object.keys(l.positions ?? {}),
     positions: l.positions ?? {},
     viewMode: l.parameters?.view,
+    ...(l.parameters?.locked ? { locked: true } : {}),
   }))
 
   const schema: Schema = { tables }

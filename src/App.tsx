@@ -136,8 +136,19 @@ function addedToLayoutMsg(layoutName: string, names: string[], lang: Lang): stri
   return lang === 'ru' ? `Добавлено в ${layoutName}: ${list}` : `Added to ${layoutName}: ${list}`
 }
 
+// stable empty-set reference so memos/selectors that fall back to "no filter
+// set for this view yet" don't manufacture a fresh Set (and a fresh render)
+// on every call
+const EMPTY_TAG_SET: ReadonlySet<string> = new Set()
+
 type EdgeSide = 'L' | 'R'
 interface TableRect { x: number; y: number; width: number }
+
+// Below this horizontal gap, routeOrtho's obstacle clearance (MARGIN=14 each
+// side, ESCAPE=60 outer ring — see utils/orthoRoute.ts) doesn't leave a clean
+// face-to-face channel between the two tables, so the route ends up hugging
+// one of their borders instead of passing cleanly between them.
+const SIDE_GAP_CLEARANCE = 60
 
 // Which side (left/right) each end of an FK edge should connect from, based
 // on the two tables' current horizontal placement — not a fixed
@@ -145,10 +156,13 @@ interface TableRect { x: number; y: number; width: number }
 // aren't simply arranged left-to-right on screen. `a`/`b` are the edge's two
 // endpoint tables in either order; the geometry itself is symmetric.
 //
-//   - one fully left of the other (no x-overlap)   -> connect via the sides
-//     facing each other (right of the left one, left of the right one)
-//   - overlapping, lower one sticks out to the left -> both connect on the left
-//   - overlapping, lower one sticks out to the right -> both connect on the right
+//   - one fully left of the other, with enough of a gap for a clean channel
+//     -> connect via the sides facing each other (right of the left one,
+//        left of the right one)
+//   - overlapping (or too close for a clean channel — see SIDE_GAP_CLEARANCE),
+//     lower one sticks out to the left  -> both connect on the left
+//   - overlapping (or too close), lower one sticks out to the right
+//     -> both connect on the right
 //   - lower one's span sits entirely inside the upper one's -> fall back to
 //     comparing centers
 function pickEdgeSides(a: TableRect, b: TableRect): { aSide: EdgeSide; bSide: EdgeSide } {
@@ -156,7 +170,11 @@ function pickEdgeSides(a: TableRect, b: TableRect): { aSide: EdgeSide; bSide: Ed
   const upper = lower === a ? b : a
   const lowerRight = lower.x + lower.width
   const upperRight = upper.x + upper.width
-  const overlaps = lower.x < upperRight && upper.x < lowerRight
+  // inflating one side by the clearance before testing intersection treats a
+  // too-narrow gap the same as a true overlap, routing both ends around one
+  // shared side instead of threading the router through a gap it can't keep
+  // clear of both borders at once
+  const overlaps = lower.x < upperRight + SIDE_GAP_CLEARANCE && upper.x < lowerRight + SIDE_GAP_CLEARANCE
 
   let lowerSide: EdgeSide
   let upperSide: EdgeSide
@@ -328,12 +346,22 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   const groupsBtnRef = useRef<HTMLDivElement>(null)
 
   const [viewMode, setViewMode] = useState<ViewMode>('full')
-  const [tagFilter, setTagFilter] = useState<string | null>(null)
+  // group-filter selection is independent per view: one Set for the "All
+  // tables" canvas, one per layout (see activeTagFilter/viewKey below) —
+  // picking a tag while looking at all tables must not silently apply inside
+  // a layout too, and each layout keeps its own choice.
+  const [baseTagFilter, setBaseTagFilter] = useState<Set<string>>(new Set())
+  const [layoutTagFilters, setLayoutTagFilters] = useState<Record<string, Set<string>>>({})
+  // tables hidden via the selection toolbar's Hide button — session-only
+  // (never persisted/exported/saved), keyed per view for the same reason
+  const [hiddenTables, setHiddenTables] = useState<Record<string, Set<string>>>({})
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [activeLayoutId, setActiveLayoutId] = useState<string | null>(null)
   // mirror of activeLayoutId for use inside save callbacks without dep churn
   const activeLayoutIdRef = useRef<string | null>(null)
   useEffect(() => { activeLayoutIdRef.current = activeLayoutId }, [activeLayoutId])
+  // per-view key used to scope the tag filter and hidden-table set below
+  const viewKey = activeLayoutId ?? '__all__'
   const [layoutsOpen, setLayoutsOpen] = useState(false)
   const [layoutSettingsId, setLayoutSettingsId] = useState<string | null>(null)
   const [addTablesOpen, setAddTablesOpen] = useState(false)
@@ -409,6 +437,27 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     [schema, activeLayoutId]
   )
 
+  // this view's selected group tags and hidden-table set — see
+  // baseTagFilter/layoutTagFilters/hiddenTables above for why these are keyed
+  // per view instead of being single shared pieces of state
+  const activeTagFilter = activeLayoutId ? (layoutTagFilters[activeLayoutId] ?? EMPTY_TAG_SET) : baseTagFilter
+  const currentHidden = hiddenTables[viewKey] ?? EMPTY_TAG_SET
+
+  // Table names visible in the current view before the Hide toggle is
+  // applied: layout membership (if any) narrowed by that view's selected
+  // group tags (OR — matching any one selected tag is enough), or for "All
+  // tables" the tag filter alone. `null` means no tag filtering is active.
+  const scopedVisibleNames = useMemo(() => {
+    if (!schema) return null
+    if (activeLayout) {
+      if (activeTagFilter.size === 0) return new Set(activeLayout.tables)
+      const tableTags = new Map(schema.tables.map(t => [t.name, t.tags ?? []]))
+      return new Set(activeLayout.tables.filter(name => tableTags.get(name)?.some(tag => activeTagFilter.has(tag))))
+    }
+    if (baseTagFilter.size === 0) return null
+    return new Set(schema.tables.filter(t => t.tags?.some(tag => baseTagFilter.has(tag))).map(t => t.name))
+  }, [schema, activeLayout, activeTagFilter, baseTagFilter])
+
   // The position a node is actually showing right now, mirroring displayNodes'
   // per-view source of truth. Drag math (group-drag origins, overlap rects)
   // must read this — not the raw node.position — because the base `nodes`
@@ -416,39 +465,36 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // position lives in layoutPosRef and is otherwise applied at render time only.
   const resolvedPosition = useCallback((n: Node): { x: number; y: number } => {
     if (activeLayout) return layoutPosRef.current[activeLayout.id]?.[n.id] ?? n.position
-    if (!tagFilter) return masterPositionsRef.current[n.id] ?? n.position
+    if (baseTagFilter.size === 0) return masterPositionsRef.current[n.id] ?? n.position
     return n.position
-  }, [activeLayout, tagFilter])
+  }, [activeLayout, baseTagFilter])
 
   const displayNodes = useMemo(() => {
     if (activeLayout) {
-      const visible = new Set(activeLayout.tables)
       const pos = layoutPosRef.current[activeLayout.id] ?? {}
       return nodes.map(n => ({
         ...n,
-        hidden: !visible.has(n.id),
+        hidden: !scopedVisibleNames?.has(n.id) || currentHidden.has(n.id),
         position: pos[n.id] ?? n.position,
       }))
     }
-    if (!tagFilter || !schema) {
+    if (!scopedVisibleNames) {
       return nodes.map(n => ({
         ...n,
-        hidden: false,
+        hidden: currentHidden.has(n.id),
         position: masterPositionsRef.current[n.id] ?? n.position
       }))
     }
-    const visible = new Set(schema.tables.filter(t => t.tags?.includes(tagFilter)).map(t => t.name))
-    return nodes.map(n => ({ ...n, hidden: !visible.has(n.id) }))
-  }, [nodes, tagFilter, schema, activeLayout])
+    return nodes.map(n => ({ ...n, hidden: !scopedVisibleNames.has(n.id) || currentHidden.has(n.id) }))
+  }, [nodes, scopedVisibleNames, currentHidden, activeLayout])
 
   const displayEdges = useMemo(() => {
     let visibleEdges = edges
-    if (activeLayout) {
-      const visible = new Set(activeLayout.tables)
-      visibleEdges = edges.filter(e => visible.has(e.source) && visible.has(e.target))
-    } else if (tagFilter && schema) {
-      const visibleNames = new Set(schema.tables.filter(t => t.tags?.includes(tagFilter)).map(t => t.name))
-      visibleEdges = edges.filter(e => visibleNames.has(e.source) && visibleNames.has(e.target))
+    if (scopedVisibleNames) {
+      visibleEdges = visibleEdges.filter(e => scopedVisibleNames.has(e.source) && scopedVisibleNames.has(e.target))
+    }
+    if (currentHidden.size > 0) {
+      visibleEdges = visibleEdges.filter(e => !currentHidden.has(e.source) && !currentHidden.has(e.target))
     }
 
     // re-pick each edge's connection side against the tables' current
@@ -468,7 +514,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       const { sourceColumn, targetColumn } = e.data as OrthoEdgeData
       return { ...e, sourceHandle: `col-${sourceColumn}-${aSide}`, targetHandle: `col-${targetColumn}-${bSide}` }
     })
-  }, [edges, tagFilter, schema, activeLayout, displayNodes])
+  }, [edges, scopedVisibleNames, currentHidden, displayNodes])
 
   // React Flow's native selection (marquee, click, shift-click) is the single
   // source of truth. A multi-selection becomes the highlighted group; a single
@@ -508,14 +554,21 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     }
   }, [setNodes])
 
-  const allTags = useMemo(() => {
+  // Tags shown in the Groups dropdown, scoped to the current view: every tag
+  // in the schema for "All tables", or only tags actually used by this
+  // layout's own tables when a layout is active — checking a tag that
+  // matches nothing in the current layout would be a dead control.
+  const scopedTags = useMemo(() => {
     if (!schema) return []
+    const source = activeLayout
+      ? schema.tables.filter(t => activeLayout.tables.includes(t.name))
+      : schema.tables
     const counts: Record<string, number> = {}
-    for (const t of schema.tables) {
+    for (const t of source) {
       for (const tag of (t.tags ?? [])) counts[tag] = (counts[tag] ?? 0) + 1
     }
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([tag, count]) => ({ tag, count }))
-  }, [schema])
+  }, [schema, activeLayout])
 
   useEffect(() => {
     if (!groupsOpen) return
@@ -535,22 +588,53 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     return () => document.removeEventListener('mousedown', handler)
   }, [layoutsOpen])
 
-  const selectTagGroup = useCallback((tag: string | null) => {
-    setActiveLayoutId(null)
-    setTagFilter(tag)
-    setGroupsOpen(false)
-    applyViewMode(baseViewMode)
-  }, [applyViewMode, baseViewMode])
+  // Toggle one tag's membership in the current view's filter set (OR
+  // semantics: a table shows if it matches ANY checked tag). "All tables" and
+  // each layout keep independent sets — see baseTagFilter/layoutTagFilters.
+  const toggleActiveTag = useCallback((tag: string) => {
+    if (activeLayoutId) {
+      setLayoutTagFilters(prev => {
+        const next = new Set(prev[activeLayoutId] ?? [])
+        if (next.has(tag)) next.delete(tag); else next.add(tag)
+        return { ...prev, [activeLayoutId]: next }
+      })
+    } else {
+      setBaseTagFilter(prev => {
+        const next = new Set(prev)
+        if (next.has(tag)) next.delete(tag); else next.add(tag)
+        return next
+      })
+    }
+  }, [activeLayoutId])
 
-  const prevTagFilterRef = useRef<string | null>(tagFilter)
+  // "All groups" row — clears this view's filter back to showing everything
+  const clearActiveTagFilter = useCallback(() => {
+    if (activeLayoutId) {
+      setLayoutTagFilters(prev => {
+        if (!prev[activeLayoutId]?.size) return prev
+        const next = { ...prev }
+        delete next[activeLayoutId]
+        return next
+      })
+    } else {
+      setBaseTagFilter(new Set())
+    }
+  }, [activeLayoutId])
+
+  // Re-arrange into a compact ELK layout whenever the "All tables" tag
+  // filter changes — only for that view: inside a layout the tag filter is a
+  // pure show/hide toggle (like Hide below), since the user's own manual
+  // arrangement there should never get silently rearranged by a filter click.
+  const baseTagKey = useMemo(() => JSON.stringify([...baseTagFilter].sort()), [baseTagFilter])
+  const prevBaseTagKeyRef = useRef<string>(baseTagKey)
   useEffect(() => {
-    if (!schema) return
-    // only re-frame when the tag group actually changes — not on content/viewMode edits
-    const tagChanged = prevTagFilterRef.current !== tagFilter
-    prevTagFilterRef.current = tagFilter
+    if (!schema || activeLayoutId) return
+    // only re-frame when the tag selection actually changed — not on content/viewMode edits
+    const tagChanged = prevBaseTagKeyRef.current !== baseTagKey
+    prevBaseTagKeyRef.current = baseTagKey
     setHighlightTable(null)
 
-    if (!tagFilter) {
+    if (baseTagFilter.size === 0) {
       if (Object.keys(masterPositionsRef.current).length > 0) {
         setNodes(prev => prev.map(n => ({
           ...n,
@@ -561,7 +645,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       return
     }
 
-    const visibleNames = new Set(schema.tables.filter(t => t.tags?.includes(tagFilter)).map(t => t.name))
+    const visibleNames = new Set(schema.tables.filter(t => t.tags?.some(tag => baseTagFilter.has(tag))).map(t => t.name))
     if (visibleNames.size === 0) return
 
     const heights: Record<string, number> = {}
@@ -578,7 +662,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       ))
       if (tagChanged) setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 50)
     })
-  }, [tagFilter, schema, setNodes, viewMode])
+  }, [baseTagKey, baseTagFilter, schema, setNodes, viewMode, activeLayoutId])
 
   const clearHighlight = useCallback(() => {
     setHighlightTable(null)
@@ -608,11 +692,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       return
     }
     if (!mods.alt || !schema) return
-    const visibleTables = activeLayout
-      ? schema.tables.filter(t => activeLayout.tables.includes(t.name))
-      : tagFilter
-      ? schema.tables.filter(t => t.tags?.includes(tagFilter))
-      : schema.tables
+    const visibleTables = schema.tables.filter(t =>
+      (!scopedVisibleNames || scopedVisibleNames.has(t.name)) && !currentHidden.has(t.name)
+    )
     // Set the group directly rather than through React Flow selection: with no
     // exclusive satellites this is just the clicked table, and routing a
     // single-node selection through handleSelectionChange would turn it into an
@@ -621,7 +703,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     // focus + its exclusive satellites light up.
     setHighlightTable(name)
     setSelectedTables(new Set([name, ...exclusiveNeighbors(visibleTables, name)]))
-  }, [schema, activeLayout, tagFilter, highlightTable])
+  }, [schema, scopedVisibleNames, currentHidden, highlightTable])
 
   const highlightCtxValue = useMemo((): HighlightCtxValue => {
     // manual selection mode takes precedence over neighbor highlight
@@ -659,7 +741,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       const { positions } = await computeELKLayout(schema, heights, filter)
       if (activeLayout) {
         layoutPosRef.current[activeLayout.id] = { ...(layoutPosRef.current[activeLayout.id] ?? {}), ...positions }
-      } else if (!tagFilter) {
+      } else if (baseTagFilter.size === 0) {
         masterPositionsRef.current = { ...positions }
       }
       setNodes(prev => prev.map(n => ({ ...n, position: positions[n.id] ?? n.position })))
@@ -677,32 +759,32 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     } finally {
       setLayouting(false)
     }
-  }, [schema, layouting, setNodes, tagFilter, viewMode, activeLayout])
+  }, [schema, layouting, setNodes, baseTagFilter, viewMode, activeLayout])
 
   useEffect(() => {
     if (!pendingELK || layouting || nodes.length === 0) return
-    const visibleNodes = tagFilter && schema
-      ? nodes.filter(n => schema.tables.find(t => t.name === n.id)?.tags?.includes(tagFilter))
+    const visibleNodes = baseTagFilter.size > 0 && schema
+      ? nodes.filter(n => schema.tables.find(t => t.name === n.id)?.tags?.some(tag => baseTagFilter.has(tag)))
       : nodes
     if (visibleNodes.length === 0) return
     const measuredCount = visibleNodes.filter(n => (n.measured as { height?: number } | undefined)?.height).length
     if (measuredCount < visibleNodes.length) return
     setPendingELK(false)
     handleLayout()
-  }, [pendingELK, nodes, layouting, handleLayout, tagFilter, schema])
+  }, [pendingELK, nodes, layouting, handleLayout, baseTagFilter, schema])
 
   // persist a dragged position to the active view: layout ref, else master
   // (tag-filter view is ephemeral — no persistence)
   const persistPos = useCallback((id: string, pos: { x: number; y: number }) => {
     if (activeLayoutId) {
       (layoutPosRef.current[activeLayoutId] ??= {})[id] = pos
-    } else if (!tagFilter) {
+    } else if (baseTagFilter.size === 0) {
       // fresh object (not an in-place mutation) so consumers that only
       // re-render on reference change (e.g. the JSON editor's live preview
       // of master positions) actually pick up the drag
       masterPositionsRef.current = { ...masterPositionsRef.current, [id]: pos }
     }
-  }, [activeLayoutId, tagFilter])
+  }, [activeLayoutId, baseTagFilter])
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     onNodesChange(changes)
@@ -774,7 +856,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // ── Layouts ────────────────────────────────────────────────────────────
   const selectLayout = useCallback((id: string | null) => {
     setActiveLayoutId(id)
-    setTagFilter(null)
     setHighlightTable(null); setSelectedTables(new Set())
     setLayoutsOpen(false)
     // restore this view's saved detail level
@@ -798,7 +879,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     const layouts = [...(schema.layouts ?? []), { id, name, tables, positions, viewMode }]
     setSchema({ ...schema, layouts })
     setSelectedTables(new Set()); setHighlightTable(null)
-    setTagFilter(null); setLayoutsOpen(false)
+    setLayoutsOpen(false)
     setActiveLayoutId(id)
     if (tables.length > 0) {
       setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
@@ -887,6 +968,52 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     setLayoutSettingsId(null)
     if (activeLayoutId === id) selectLayout(null)
   }, [schema, activeLayoutId, selectLayout])
+
+  const toggleLayoutLock = useCallback((id: string) => {
+    if (!schema) return
+    setSchema({ ...schema, layouts: (schema.layouts ?? []).map(l => l.id === id ? { ...l, locked: !l.locked } : l) })
+  }, [schema])
+
+  // ── Selection toolbar: Hide / Show / Delete-from-layout ─────────────────
+  // Hide/Show are session-only (never persisted) and scoped to the current
+  // view via viewKey, same as the group-tag filters above — hiding a table
+  // while looking at Layout A must not also hide it in Layout B or "All
+  // tables". Delete-from-layout only removes membership in the active
+  // layout's own table list; the table itself (and any other layout it's in)
+  // is untouched.
+  const hideSelected = useCallback(() => {
+    const ids = [...highlightCtxValue.highlighted]
+    if (ids.length === 0) return
+    setHiddenTables(prev => {
+      const next = new Set(prev[viewKey] ?? [])
+      ids.forEach(id => next.add(id))
+      return { ...prev, [viewKey]: next }
+    })
+    setSelectedTables(new Set()); setHighlightTable(null)
+  }, [highlightCtxValue.highlighted, viewKey])
+
+  const showHiddenTables = useCallback(() => {
+    setHiddenTables(prev => {
+      if (!prev[viewKey]?.size) return prev
+      const next = { ...prev }
+      delete next[viewKey]
+      return next
+    })
+  }, [viewKey])
+
+  const deleteSelectedFromLayout = useCallback(() => {
+    if (!schema || !activeLayout) return
+    const ids = new Set(highlightCtxValue.highlighted)
+    if (ids.size === 0) return
+    const posMap = layoutPosRef.current[activeLayout.id]
+    if (posMap) ids.forEach(id => delete posMap[id])
+    setSchema({
+      ...schema,
+      layouts: schema.layouts!.map(l => l.id === activeLayout.id ? { ...l, tables: l.tables.filter(name => !ids.has(name)) } : l),
+    })
+    setSelectedTables(new Set()); setHighlightTable(null)
+    showToast(lang === 'ru' ? `Удалено из лэйаута: ${ids.size}` : `Removed from layout: ${ids.size}`)
+  }, [schema, activeLayout, highlightCtxValue.highlighted, lang, showToast])
 
   const t = T[lang]
   const handleEdit = useCallback((table: Table) => setEditorState(table.name), [])
@@ -1091,7 +1218,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
 
   const handleExit = useCallback(() => {
     clearCurrentSession(); setSchema(null)
-    setFileHandle(null); setTagFilter(null); setActiveLayoutId(null); setEditorState(null)
+    setFileHandle(null); setBaseTagFilter(new Set()); setLayoutTagFilters({}); setHiddenTables({})
+    setActiveLayoutId(null); setEditorState(null)
     setCurrentSaveId(null); setCurrentSaveName(null)
   }, [])
 
@@ -1161,7 +1289,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   }, [schema, applySchema, t, highlightTable, dialog, lang])
 
   const handleOpen = useCallback((result: OpenResult) => {
-    setHighlightTable(null); setSelectedTables(new Set()); setTagFilter(null); setActiveLayoutId(null)
+    setHighlightTable(null); setSelectedTables(new Set())
+    setBaseTagFilter(new Set()); setLayoutTagFilters({}); setHiddenTables({})
+    setActiveLayoutId(null)
     setFileHandle(result.fileHandle ?? null)
     setCurrentSaveId(result.saveId ?? null)
     setCurrentSaveName(result.saveName ?? null)
@@ -1193,35 +1323,45 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
         {/* Canvas toolbar — groups, view mode, layouts, organize, JSON split */}
         <div className={appStyles.canvasToolbar}>
 
-          {/* Groups */}
+          {/* Groups — multi-select checkboxes, OR-filtered, scoped + independent per view (see scopedTags/activeTagFilter) */}
           <div className={appStyles.groupsPill} ref={groupsBtnRef}>
             <button
               onClick={() => setGroupsOpen(!groupsOpen)}
-              className={`${appStyles.groupsBtn} ${tagFilter ? appStyles.groupsBtnFiltered : ''}`}
+              className={`${appStyles.groupsBtn} ${activeTagFilter.size > 0 ? appStyles.groupsBtnFiltered : ''}`}
             >
               <span className={appStyles.toolBtnIcon}>◎</span>
               <span className={appStyles.toolBtnLabel}>
-                {tagFilter ? `#${tagFilter}` : (lang === 'ru' ? 'Группы' : 'Groups')}
+                {activeTagFilter.size === 1
+                  ? `#${[...activeTagFilter][0]}`
+                  : activeTagFilter.size > 1
+                  ? (lang === 'ru' ? `Групп: ${activeTagFilter.size}` : `${activeTagFilter.size} groups`)
+                  : (lang === 'ru' ? 'Группы' : 'Groups')}
               </span>
               <span className={appStyles.groupsChevron}>▼</span>
             </button>
             {groupsOpen && (
               <div className={appStyles.groupsDropdown}>
                 <button
-                  onClick={() => selectTagGroup(null)}
-                  className={`${appStyles.groupsAllBtn} ${tagFilter === null ? appStyles.groupsAllBtnActive : ''}`}
+                  onClick={clearActiveTagFilter}
+                  className={`${appStyles.groupsAllBtn} ${activeTagFilter.size === 0 ? appStyles.groupsAllBtnActive : ''}`}
                 >
                   <span>{lang === 'ru' ? 'Все таблицы' : 'All groups'}</span>
-                  {tagFilter === null && <span>✓</span>}
+                  {activeTagFilter.size === 0 && <span>✓</span>}
                 </button>
                 <div className={appStyles.groupsDivider} />
-                {allTags.map(({ tag, count }) => (
+                {scopedTags.length === 0 && (
+                  <div className={appStyles.layoutEmpty}>{lang === 'ru' ? 'Нет тегов' : 'No tags'}</div>
+                )}
+                {scopedTags.map(({ tag, count }) => (
                   <button
                     key={tag}
-                    onClick={() => selectTagGroup(tag)}
-                    className={`${appStyles.groupsTagBtn} ${tagFilter === tag ? appStyles.groupsTagBtnActive : ''}`}
+                    onClick={() => toggleActiveTag(tag)}
+                    className={`${appStyles.groupsTagBtn} ${activeTagFilter.has(tag) ? appStyles.groupsTagBtnActive : ''}`}
                   >
                     <div className={appStyles.groupsTagLeft}>
+                      <span className={`${appStyles.groupsCheckbox} ${activeTagFilter.has(tag) ? appStyles.groupsCheckboxChecked : ''}`}>
+                        {activeTagFilter.has(tag) && '✓'}
+                      </span>
                       <span className={appStyles.groupsTagDot} />
                       <span>{tag}</span>
                     </div>
@@ -1284,6 +1424,13 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
                       <span className={appStyles.groupsTagCount}>{l.tables.length}</span>
                     </button>
                     <button
+                      className={`${appStyles.layoutMenuBtn} ${l.locked ? appStyles.lockToggleActive : ''}`}
+                      onClick={e => { e.stopPropagation(); toggleLayoutLock(l.id) }}
+                      title={l.locked
+                        ? (lang === 'ru' ? 'Разблокировать лэйаут' : 'Unlock layout')
+                        : (lang === 'ru' ? 'Заблокировать лэйаут' : 'Lock layout')}
+                    >{l.locked ? '🔒' : '🔓'}</button>
+                    <button
                       className={appStyles.layoutMenuBtn}
                       onClick={e => { e.stopPropagation(); setLayoutsOpen(false); setLayoutSettingsId(l.id) }}
                       title={lang === 'ru' ? 'Настройки слоя' : 'Layout settings'}
@@ -1301,6 +1448,22 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
               </div>
             )}
           </div>
+
+          {/* Lock — only while a layout is active; blocks dragging on this layout's canvas only */}
+          {activeLayout && (
+            <div className={appStyles.toolPill}>
+              <button
+                onClick={() => toggleLayoutLock(activeLayout.id)}
+                className={`${appStyles.toolBtn} ${activeLayout.locked ? appStyles.toolBtnActive : ''}`}
+                title={activeLayout.locked
+                  ? (lang === 'ru' ? 'Разблокировать лэйаут (разрешить перетаскивание)' : 'Unlock layout (allow dragging)')
+                  : (lang === 'ru' ? 'Заблокировать лэйаут (запретить перетаскивание)' : 'Lock layout (prevent dragging)')}
+              >
+                <span className={appStyles.toolBtnIcon}>{activeLayout.locked ? '🔒' : '🔓'}</span>
+                <span className={appStyles.toolBtnLabel}>{lang === 'ru' ? 'Блокировка' : 'Lock'}</span>
+              </button>
+            </div>
+          )}
 
           {/* Organize (ELK) */}
           <div className={appStyles.toolPill}>
@@ -1398,22 +1561,58 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
               />
             )}
             <div className={appStyles.canvasArea}>
-              {/* Create-layout button — appears when a table (or group) is selected */}
-              {highlightCtxValue.highlighted.size > 0 && !activeLayout && (
-                <button className={appStyles.createLayoutFab} onClick={createLayoutFromSelection}>
-                  <span className={appStyles.createLayoutFabIcon}>▦</span>
-                  {lang === 'ru' ? 'Создать слой' : 'Create layout'}
-                  <span className={appStyles.createLayoutFabCount}>{highlightCtxValue.highlighted.size}</span>
-                </button>
-              )}
+              {/* Top-left selection/layout actions row: Create-layout or Add-table,
+                  plus Hide/Show/Delete-from-layout when applicable. All the same
+                  row so they don't stack into separate absolute-positioned FABs. */}
+              <div className={appStyles.topLeftFabRow}>
+                {/* Create-layout button — appears when a table (or group) is selected */}
+                {highlightCtxValue.highlighted.size > 0 && !activeLayout && (
+                  <button className={`${appStyles.createLayoutFab} ${appStyles.fabInWrap}`} onClick={createLayoutFromSelection}>
+                    <span className={appStyles.createLayoutFabIcon}>▦</span>
+                    {lang === 'ru' ? 'Создать слой' : 'Create layout'}
+                    <span className={appStyles.createLayoutFabCount}>{highlightCtxValue.highlighted.size}</span>
+                  </button>
+                )}
 
-              {/* Add-table button — appears whenever a layout is active */}
-              {activeLayout && (
-                <button className={appStyles.createLayoutFab} onClick={() => setAddTablesOpen(true)}>
-                  <span className={appStyles.createLayoutFabIcon}>＋</span>
-                  {lang === 'ru' ? 'Добавить таблицу' : 'Add table'}
-                </button>
-              )}
+                {/* Add-table button — appears whenever a layout is active */}
+                {activeLayout && (
+                  <button className={`${appStyles.createLayoutFab} ${appStyles.fabInWrap}`} onClick={() => setAddTablesOpen(true)}>
+                    <span className={appStyles.createLayoutFabIcon}>＋</span>
+                    {lang === 'ru' ? 'Добавить таблицу' : 'Add table'}
+                  </button>
+                )}
+
+                {/* Hide — removes the current selection (and its edges) from this view only */}
+                {highlightCtxValue.highlighted.size > 0 && (
+                  <button className={`${appStyles.actionFab} ${appStyles.fabInWrap}`} onClick={hideSelected}>
+                    <span className={appStyles.createLayoutFabIcon}>⊘</span>
+                    {lang === 'ru' ? 'Скрыть' : 'Hide'}
+                    <span className={appStyles.createLayoutFabCount}>{highlightCtxValue.highlighted.size}</span>
+                  </button>
+                )}
+
+                {/* Show tables — only present while this view has hidden tables */}
+                {currentHidden.size > 0 && (
+                  <button className={`${appStyles.actionFab} ${appStyles.fabInWrap}`} onClick={showHiddenTables}>
+                    <span className={appStyles.createLayoutFabIcon}>👁</span>
+                    {lang === 'ru' ? 'Показать таблицы' : 'Show tables'}
+                    <span className={appStyles.createLayoutFabCount}>{currentHidden.size}</span>
+                  </button>
+                )}
+
+                {/* Delete — removes the selection from THIS layout only, never from the schema */}
+                {activeLayout && highlightCtxValue.highlighted.size > 0 && (
+                  <button
+                    className={`${appStyles.actionFab} ${appStyles.actionFabDanger} ${appStyles.fabInWrap}`}
+                    onClick={deleteSelectedFromLayout}
+                    title={lang === 'ru' ? 'Удалить выбранные таблицы из этого лэйаута (в схеме останутся)' : 'Remove the selected tables from this layout (they stay in the schema)'}
+                  >
+                    <span className={appStyles.createLayoutFabIcon}>🗑</span>
+                    {lang === 'ru' ? 'Удалить' : 'Delete'}
+                    <span className={appStyles.createLayoutFabCount}>{highlightCtxValue.highlighted.size}</span>
+                  </button>
+                )}
+              </div>
 
               {/* Add-to-layout — quick-add the selection to any OTHER existing layout */}
               {highlightCtxValue.highlighted.size > 0 && (schema.layouts ?? []).some(l => l.id !== activeLayoutId) && (
@@ -1471,6 +1670,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
                       fitView
                       fitViewOptions={{ padding: 0.2 }}
                       minZoom={0.05}
+                      nodesDraggable={!activeLayout?.locked}
                       selectionMode={SelectionMode.Partial}
                       panOnDrag={[2]}
                       selectionOnDrag
@@ -1504,6 +1704,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
               {splitView && !schemaValid && (
                 <div className={appStyles.freezeBanner}>
                   ⚠ {lang === 'ru' ? 'Исправьте ошибки схемы в редакторе' : 'Fix schema errors in the editor'}
+                </div>
+              )}
+
+              {/* Dragging is disabled (nodesDraggable above) while the active
+                  layout is locked — tables can still be selected/edited. */}
+              {activeLayout?.locked && (
+                <div className={appStyles.lockedBanner}>
+                  🔒 {lang === 'ru' ? 'Канвас заблокирован' : 'Canvas locked'}
                 </div>
               )}
             </div>

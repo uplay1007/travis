@@ -79,7 +79,8 @@ export function schemaToDSL(schema: Schema, masterPositions: Record<string, { x:
     `Layout "${ALL_TABLES_LAYOUT}" {\n${posLines(masterPositions)}\n}`,
     ...(schema.layouts ?? []).map(l => {
       const viewLine = l.viewMode && l.viewMode !== 'full' ? `  view ${l.viewMode}\n` : ''
-      return `Layout "${l.name}" {\n${viewLine}${posLines(l.positions, new Set(l.tables))}\n}`
+      const lockedLine = l.locked ? `  locked\n` : ''
+      return `Layout "${l.name}" {\n${viewLine}${lockedLine}${posLines(l.positions, new Set(l.tables))}\n}`
     }),
   ]
 
@@ -200,9 +201,11 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
   for (const block of layoutBlocks) {
     const positions: Record<string, { x: number; y: number }> = {}
     let view: Layout['viewMode'] | undefined
+    let locked = false
     for (const { line, text: raw } of block.lines) {
       const vm = /^view\s+(full|compact|collapsed)\s*$/i.exec(raw)
       if (vm) { view = vm[1].toLowerCase() as Layout['viewMode']; continue }
+      if (/^locked\s*$/i.test(raw)) { locked = true; continue }
       const pm = /^([A-Za-z_]\w*)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*$/.exec(raw)
       if (pm) {
         const [, tblName, xs, ys] = pm
@@ -210,7 +213,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
         else positions[tblName] = { x: parseFloat(xs), y: parseFloat(ys) }
         continue
       }
-      diagnostics.push({ line, message: `Invalid line in layout block — expected "table x y" or "view <full|compact|collapsed>"` })
+      diagnostics.push({ line, message: `Invalid line in layout block — expected "table x y", "view <full|compact|collapsed>" or "locked"` })
     }
     if (!block.name) continue
     if (block.name === ALL_TABLES_LAYOUT) {
@@ -223,6 +226,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
         tables: Object.keys(positions),
         positions,
         ...(view ? { viewMode: view } : {}),
+        ...(locked ? { locked: true } : {}),
       })
     }
   }
