@@ -79,7 +79,7 @@ export function schemaToDSL(schema: Schema, masterPositions: Record<string, { x:
     `Layout "${ALL_TABLES_LAYOUT}" {\n${posLines(masterPositions)}\n}`,
     ...(schema.layouts ?? []).map(l => {
       const viewLine = l.viewMode && l.viewMode !== 'full' ? `  view ${l.viewMode}\n` : ''
-      const lockedLine = l.locked ? `  locked\n` : ''
+      const lockedLine = l.locked ? `  locked: true\n` : ''
       return `Layout "${l.name}" {\n${viewLine}${lockedLine}${posLines(l.positions, new Set(l.tables))}\n}`
     }),
   ]
@@ -91,7 +91,10 @@ export function schemaToDSL(schema: Schema, masterPositions: Record<string, { x:
 const REL_RE = /^([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*>\s*([A-Za-z_]\w*)\.([A-Za-z_]\w*)$/
 
 export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
-  const prevTags = new Map(prevSchema?.tables.map(t => [t.name, t.tags ?? []]) ?? [])
+  // The DSL only spells out a table's columns, so everything else a table
+  // carries (tags, architectural type, manual color) is preserved by name
+  // from the pre-edit schema instead of being dropped on every keystroke.
+  const prevMeta = new Map(prevSchema?.tables.map(t => [t.name, t]) ?? [])
   const prevLayouts = new Map(prevSchema?.layouts?.map(l => [l.name, l]) ?? [])
   const diagnostics: DSLDiagnostic[] = []
   const tables: Table[] = []
@@ -132,7 +135,10 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
         const name = tm[1].trim()
         if (!IDENT.test(name)) diagnostics.push({ line: lineNo, message: `Invalid table name "${name}" — latin letters, digits and _ only` })
         if (byName.has(name)) diagnostics.push({ line: lineNo, message: `Duplicate table "${name}"` })
-        cur = { name, columns: [], tags: prevTags.get(name) ?? [] }
+        const prev = prevMeta.get(name)
+        cur = { name, columns: [], tags: prev?.tags ?? [] }
+        if (prev?.type) cur.type = prev.type
+        if (prev?.color) cur.color = prev.color
         tables.push(cur); byName.set(name, cur)
         curCols = new Set()
         mode = 'table'
@@ -205,7 +211,11 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
     for (const { line, text: raw } of block.lines) {
       const vm = /^view\s+(full|compact|collapsed)\s*$/i.exec(raw)
       if (vm) { view = vm[1].toLowerCase() as Layout['viewMode']; continue }
-      if (/^locked\s*$/i.test(raw)) { locked = true; continue }
+      // `locked: true` rather than a bare `locked` keyword — a bare reserved
+      // word would share the line-namespace with the "<table> x y" position
+      // lines, so a table actually named `locked` could be read as the flag.
+      const lm = /^locked\s*:\s*(true|false)\s*$/i.exec(raw)
+      if (lm) { locked = lm[1].toLowerCase() === 'true'; continue }
       const pm = /^([A-Za-z_]\w*)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*$/.exec(raw)
       if (pm) {
         const [, tblName, xs, ys] = pm
@@ -213,7 +223,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
         else positions[tblName] = { x: parseFloat(xs), y: parseFloat(ys) }
         continue
       }
-      diagnostics.push({ line, message: `Invalid line in layout block — expected "table x y", "view <full|compact|collapsed>" or "locked"` })
+      diagnostics.push({ line, message: `Invalid line in layout block — expected "table x y", "view <full|compact|collapsed>" or "locked: true"` })
     }
     if (!block.name) continue
     if (block.name === ALL_TABLES_LAYOUT) {

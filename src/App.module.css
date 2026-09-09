@@ -958,25 +958,10 @@
   border-radius: 4px;
 }
 
-/* View select */
-.viewSelect {
-  padding: 8px 16px;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-  outline: none;
-  cursor: pointer;
-  transition: color 0.15s;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border: none;
-  appearance: none;
-}
-
-.viewSelect:hover {
-  color: var(--text-on-surface);
+/* the view-mode dropdown only holds three short labels — the 256px the
+   Groups/Layouts lists need would leave it mostly empty */
+.groupsDropdownNarrow {
+  width: 168px;
 }
 
 /* ReactFlow Controls overrides — !important needed to beat ReactFlow's built-in styles */

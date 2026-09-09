@@ -250,6 +250,79 @@ export function routeOrtho(
   return out
 }
 
+// Nudging a segment sideways eats into the MARGIN (14px) clearance routeOrtho
+// keeps around every table, so the total offset is capped well below it.
+const MAX_SEGMENT_OFFSET = 12
+
+/**
+ * Nudges apart route segments from DIFFERENT edges that would otherwise be
+ * drawn on top of each other — two parallel lines running along the exact
+ * same coordinate read as one line, hiding a relationship entirely.
+ *
+ * Only interior segments move: the first and last of each route stay put so
+ * the line still meets its table-side anchor dot. Shifting a segment moves
+ * the corners it shares with its (perpendicular) neighbours, which just makes
+ * those neighbours a little longer or shorter — the route stays orthogonal.
+ *
+ * Takes every visible edge's route at once, since overlap is a property of a
+ * pair of routes, not of either one alone. Returns fresh point arrays.
+ */
+export function spreadOverlappingSegments(routes: Map<string, Pt[]>, spread = 5): Map<string, Pt[]> {
+  const out = new Map<string, Pt[]>()
+  for (const [id, pts] of routes) out.set(id, pts.map(p => ({ ...p })))
+
+  interface Seg { id: string; i: number; vertical: boolean; fixed: number; lo: number; hi: number }
+  const segs: Seg[] = []
+  for (const [id, pts] of out) {
+    for (let i = 1; i <= pts.length - 3; i++) {
+      const a = pts[i], b = pts[i + 1]
+      const vertical = Math.abs(a.x - b.x) < 0.5
+      const lo = vertical ? Math.min(a.y, b.y) : Math.min(a.x, b.x)
+      const hi = vertical ? Math.max(a.y, b.y) : Math.max(a.x, b.x)
+      if (hi - lo < 1) continue // degenerate corner, nothing to spread
+      segs.push({ id, i, vertical, fixed: vertical ? a.x : a.y, lo, hi })
+    }
+  }
+
+  for (const vertical of [true, false]) {
+    // segments sharing a line (same orientation, near-identical fixed coord)
+    const line = segs.filter(s => s.vertical === vertical).sort((a, b) => a.fixed - b.fixed || a.lo - b.lo)
+    let i = 0
+    while (i < line.length) {
+      let j = i + 1
+      while (j < line.length && line[j].fixed - line[i].fixed <= spread) j++
+      // ...then, within that line, the runs whose spans actually touch
+      const onLine = line.slice(i, j).sort((a, b) => a.lo - b.lo)
+      let k = 0
+      while (k < onLine.length) {
+        let end = k + 1
+        let maxHi = onLine[k].hi
+        while (end < onLine.length && onLine[end].lo < maxHi) {
+          maxHi = Math.max(maxHi, onLine[end].hi)
+          end++
+        }
+        const cluster = onLine.slice(k, end)
+        if (cluster.length > 1) {
+          // stable order so the same pair always separates the same way
+          // instead of swapping sides between renders
+          cluster.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.i - b.i))
+          cluster.forEach((s, idx) => {
+            const raw = (idx - (cluster.length - 1) / 2) * spread
+            const delta = Math.max(-MAX_SEGMENT_OFFSET, Math.min(MAX_SEGMENT_OFFSET, raw))
+            if (delta === 0) return
+            const pts = out.get(s.id)!
+            if (s.vertical) { pts[s.i].x += delta; pts[s.i + 1].x += delta }
+            else { pts[s.i].y += delta; pts[s.i + 1].y += delta }
+          })
+        }
+        k = end
+      }
+      i = j
+    }
+  }
+  return out
+}
+
 /** Polyline -> SVG path with softly rounded corners. */
 export function pointsToPath(pts: Pt[], radius = 8): string {
   if (pts.length < 2) return ''

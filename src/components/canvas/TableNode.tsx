@@ -1,7 +1,6 @@
 import { useState, useRef, memo, useContext, useEffect } from 'react'
 import { Handle, Position, useNodeId, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
-import { tagColor } from '../../utils/colors'
-import { MultiSelectCtx } from './TableNode.multiselect'
+import { tableAccent } from '../../utils/colors'
 import { HighlightCtx } from '../../contexts/highlight'
 import { EdgeHoverCtx } from '../../contexts/edgeHover'
 import { ViewModeCtx } from '../../contexts/viewMode'
@@ -12,8 +11,6 @@ export interface TableNodeData extends Record<string, unknown> {
   table: Table
   onEdit: (table: Table) => void
 }
-
-export { MultiSelectCtx }
 
 // short header label per architectural table type
 const TYPE_LABEL: Record<string, string> = {
@@ -60,14 +57,13 @@ function ColumnRow({ col, accent, linked, hidden }: {
   )
 }
 
-export const TableNode = memo(({ data, selected }: NodeProps) => {
+export const TableNode = memo(({ data }: NodeProps) => {
   const { table, onEdit } = data as TableNodeData
   const [expanded, setExpanded] = useState(true)
-  const multiSelectActive = useContext(MultiSelectCtx)
   const hl = useContext(HighlightCtx)
   const edgeHover = useContext(EdgeHoverCtx)
   const { mode: viewMode, bulkKey, bulkExpand } = useContext(ViewModeCtx)
-  const accent = tagColor(table.tags)
+  const accent = tableAccent(table)
   const lastAppliedKey = useRef(0)
   const nodeId = useNodeId()
   const updateNodeInternals = useUpdateNodeInternals()
@@ -93,7 +89,13 @@ export const TableNode = memo(({ data, selected }: NodeProps) => {
   const isHighlighted = hl.active && hl.highlighted.has(table.name)
   const isDimmed = hl.active && !hl.highlighted.has(table.name)
   const isFocus = hl.active && hl.focusTable === table.name
-  const isMultiSelected = multiSelectActive && selected
+  // An EXPLICIT group (Cmd/Alt/Shift-click, marquee — see handleTableClick)
+  // gets its own unmistakable ring. It has to key off hl.groupMode, not React
+  // Flow's native `selected` prop: the app builds those groups in its own
+  // selectedTables state and deliberately keeps them out of native selection,
+  // so `selected` was false for every member and an explicit group rendered
+  // identically to the passive FK-neighbour highlight a plain click lights up.
+  const isMultiSelected = hl.groupMode && hl.highlighted.has(table.name)
 
   // column linked by the currently hovered FK edge (this table's endpoint)
   const linkedCol =

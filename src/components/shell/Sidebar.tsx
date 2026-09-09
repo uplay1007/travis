@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { tagColor } from '../../utils/colors'
+import { tableAccent } from '../../utils/colors'
 import type { Table } from '../../types/schema'
 import { T, type Lang } from '../../i18n'
 import styles from './Sidebar.module.css'
@@ -49,7 +49,7 @@ export function Sidebar({ tables, lang, onLangToggle, onNew, onEdit, onDelete, o
 
       <div className={styles.list}>
         {filtered.map(table => {
-          const color = tagColor(table.tags)
+          const color = tableAccent(table)
           return (
             <div key={table.name} className={styles.tableItem}>
               <span

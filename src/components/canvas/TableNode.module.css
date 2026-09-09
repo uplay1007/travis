@@ -22,9 +22,14 @@
   box-shadow: 0 0 0 4px var(--accent, #6366f1), 0 0 24px var(--accent-glow, rgba(99, 102, 241, 0.5)), 0 8px 32px rgba(0, 0, 0, 0.6);
 }
 
+/* Member of an EXPLICIT selection group (Cmd/Alt/Shift-click, marquee), as
+   opposed to the passive FK-neighbour highlight above. Drawn as an outline in
+   a fixed selection color so it reads as "selected" whatever the table's own
+   accent is, and so it composes with the highlight/focus border+shadow
+   instead of replacing them. */
 .nodeMultiSelected {
-  border: 2px solid var(--accent, #6366f1);
-  box-shadow: 0 0 0 2px var(--accent-glow2, rgba(99, 102, 241, 0.27));
+  outline: 2px dashed #818cf8;
+  outline-offset: 4px;
 }
 
 .nodeDimmed {

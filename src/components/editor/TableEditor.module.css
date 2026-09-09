@@ -324,6 +324,10 @@
   flex-wrap: wrap;
 }
 
+.tagsRow + .tagsRow {
+  margin-top: 10px;
+}
+
 .tagsLabel {
   font-size: 13px;
   color: #6b7280;
@@ -376,6 +380,34 @@
 }
 
 .typeSelect:focus { border-color: rgba(var(--overlay-rgb), 0.3); }
+
+.swatch {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--sw);
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 1px rgba(var(--overlay-rgb), 0.15);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+
+.swatch:hover { transform: scale(1.15); }
+
+.swatchActive {
+  box-shadow: 0 0 0 2px var(--bg-panel), 0 0 0 4px var(--sw);
+}
+
+/* the "back to the derived default" swatch — same color, marked with an A */
+.swatchAuto {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
 
 .tagAddBtn {
   background: rgba(99, 102, 241, 0.2);

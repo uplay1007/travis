@@ -15,6 +15,7 @@ export interface StructuredColumn {
 export interface StructuredTable {
   name: string
   type?: TableType
+  color?: string
   columns: StructuredColumn[]
 }
 export interface StructuredLayout {
@@ -44,6 +45,7 @@ export function schemaToStructured(schema: Schema, masterPositions: Record<strin
   const Tables: StructuredTable[] = schema.tables.map(t => ({
     name: t.name,
     ...(t.type ? { type: t.type } : {}),
+    ...(t.color ? { color: t.color } : {}),
     columns: t.columns.map(c => {
       const col: StructuredColumn = { name: c.name, type: c.type }
       if (c.primaryKey) col.pk = true
@@ -116,6 +118,7 @@ export function structuredToSchema(raw: StructuredSchema): Schema {
     })
     const table: Table = { name: t.name, columns, tags: [] }
     if (t.type) table.type = t.type
+    if (t.color) table.color = t.color
     return table
   })
 

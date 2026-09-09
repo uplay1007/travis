@@ -1,15 +1,14 @@
-import React, { useState, useContext, useMemo } from 'react'
+import React, { useState, useContext } from 'react'
 import {
   getSmoothStepPath,
   EdgeLabelRenderer,
-  useNodes,
   Position,
   type EdgeProps,
 } from '@xyflow/react'
 import { HighlightCtx } from '../../contexts/highlight'
 import { EdgeHoverCtx } from '../../contexts/edgeHover'
 import { ThemeCtx } from '../../contexts/theme'
-import { routeOrtho, pointsToPath, pathMidpoint, type Rect, type Side } from '../../utils/orthoRoute'
+import { pointsToPath, pathMidpoint, type Pt, type Side } from '../../utils/orthoRoute'
 import styles from './OrthoEdge.module.css'
 
 export interface OrthoEdgeData extends Record<string, unknown> {
@@ -30,6 +29,11 @@ export interface OrthoEdgeData extends Record<string, unknown> {
   targetPoint?: { x: number; y: number }
   sourceSide?: Side
   targetSide?: Side
+  // The full routed polyline, also computed in App.tsx — routing has to see
+  // every edge at once to keep two different routes from being drawn along
+  // the same line (see spreadOverlappingSegments). Absent only when no clear
+  // route was found, which falls back to a plain stepped path below.
+  points?: Pt[]
 }
 
 const LABEL_OFF = 24
@@ -49,7 +53,7 @@ export function OrthoEdge({
   const [hovered, setHovered] = useState(false)
   const {
     label, color, relType, sourceColor, targetColor, sourceColumn, targetColumn,
-    sourcePoint, targetPoint, sourceSide, targetSide,
+    sourcePoint, targetPoint, sourceSide, targetSide, points,
   } = (data ?? {}) as OrthoEdgeData
   const hl = useContext(HighlightCtx)
   const edgeHover = useContext(EdgeHoverCtx)
@@ -92,29 +96,18 @@ export function OrthoEdge({
   const startSide = (sourceSide ?? sourcePosition) as Side
   const endSide = (targetSide ?? targetPosition) as Side
 
-  // Route around the other tables rather than straight through them. Every
-  // visible node except this edge's own two endpoints is an obstacle; the
-  // router falls back to the plain stepped path if it can't find a clear way.
-  const nodes = useNodes()
+  // The route itself is computed centrally (App.tsx) so it can be kept clear
+  // of the OTHER edges' routes, not just of the tables. A plain stepped path
+  // stands in when no clear route was found.
   const [fallbackPath, fbLabelX, fbLabelY] = getSmoothStepPath({
     sourceX: startDot.x, sourceY: startDot.y, targetX: endDot.x, targetY: endDot.y,
     sourcePosition: startSide as unknown as Position, targetPosition: endSide as unknown as Position,
     borderRadius: 0,
   })
-
-  const [edgePath, labelX, labelY] = useMemo(() => {
-    const obstacles: Rect[] = []
-    for (const n of nodes) {
-      if (n.hidden || n.id === source || n.id === target) continue
-      const m = n.measured as { width?: number; height?: number } | undefined
-      if (!m?.width || !m?.height) continue
-      obstacles.push({ x: n.position.x, y: n.position.y, width: m.width, height: m.height })
-    }
-    const pts = routeOrtho(startDot, startSide, endDot, endSide, obstacles)
-    if (!pts) return [fallbackPath, fbLabelX, fbLabelY] as const
-    const mid = pathMidpoint(pts)
-    return [pointsToPath(pts), mid.x, mid.y] as const
-  }, [nodes, source, target, startDot, startSide, endDot, endSide, fallbackPath, fbLabelX, fbLabelY])
+  const mid = points ? pathMidpoint(points) : null
+  const edgePath = points ? pointsToPath(points) : fallbackPath
+  const labelX = mid ? mid.x : fbLabelX
+  const labelY = mid ? mid.y : fbLabelY
 
   const sd = POS_DIR[startSide] ?? { dx: 1, dy: 0 }
   const td = POS_DIR[endSide] ?? { dx: -1, dy: 0 }

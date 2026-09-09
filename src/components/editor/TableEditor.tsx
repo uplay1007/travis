@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import type { Table, Column, Schema, TableType } from '../../types/schema'
-import { tableColor, tagColor } from '../../utils/colors'
+import { tableColor, tagColor, PALETTE } from '../../utils/colors'
 import { T, type Lang } from '../../i18n'
 import { useDialog } from '../../contexts/DialogContext'
 import { IDENT } from '../../utils/schemaDSL'
+import { TABLE_TYPES } from '../../utils/tableTypes'
 import { FKPicker } from './FKPicker'
 import styles from './TableEditor.module.css'
 
@@ -20,16 +21,6 @@ const COMMON_TYPES = [
 function emptyCol(): Column {
   return { name: '', type: 'varchar', nullable: true }
 }
-
-// architectural role options, shown in the editor's Type selector
-const TABLE_TYPES: { value: TableType; en: string; ru: string }[] = [
-  { value: 'reference',   en: 'Reference',     ru: 'Справочник' },
-  { value: 'master',      en: 'Master',        ru: 'Мастер-данные' },
-  { value: 'transaction', en: 'Transactional', ru: 'Транзакционная' },
-  { value: 'link',        en: 'Link (M:N)',    ru: 'Связка (M:N)' },
-  { value: 'dimension',   en: 'Dimension',     ru: 'Измерение' },
-  { value: 'fact',        en: 'Fact',          ru: 'Факт' },
-]
 
 function Checkbox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -69,6 +60,7 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
   const [nameError, setNameError] = useState('')
   const [tags, setTags] = useState<string[]>(table?.tags ?? [])
   const [tableType, setTableType] = useState<TableType | ''>(table?.type ?? '')
+  const [color, setColor] = useState<string | undefined>(table?.color)
   const [tagInput, setTagInput] = useState('')
   const [isDirty, setIsDirty] = useState(false)
   const [fkPickerRow, setFkPickerRow] = useState<number | null>(null)
@@ -84,7 +76,8 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
     onClose()
   }
 
-  const accent = tagColor(tags.length > 0 ? tags : undefined)
+  const defaultAccent = tagColor(tags.length > 0 ? tags : undefined)
+  const accent = color ?? defaultAccent
 
   const updateCol = (i: number, patch: Partial<Column>) => {
     setColumns(cols => cols.map((c, idx) => idx === i ? { ...c, ...patch } : c))
@@ -123,6 +116,7 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
 
     const saved: Table = { name: trimmedName, columns, tags: finalTags }
     if (tableType) saved.type = tableType
+    if (color) saved.color = color
     onSave(saved, isNew ? null : table!.name)
   }
 
@@ -275,6 +269,28 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
                 <option key={tt.value} value={tt.value}>{lang === 'ru' ? tt.ru : tt.en}</option>
               ))}
             </select>
+          </div>
+          {/* Accent color — the swatches override the tag/name-derived default
+              (see utils/colors.ts tableAccent); "Auto" clears back to it. */}
+          <div className={styles.tagsRow}>
+            <span className={styles.tagsLabel}>{lang === 'ru' ? 'Цвет:' : 'Color:'}</span>
+            <button
+              type="button"
+              onClick={() => { setColor(undefined); setIsDirty(true) }}
+              className={`${styles.swatch} ${styles.swatchAuto} ${color === undefined ? styles.swatchActive : ''}`}
+              style={{ '--sw': defaultAccent } as React.CSSProperties}
+              title={lang === 'ru' ? 'Авто (по тегу)' : 'Auto (from tag)'}
+            >A</button>
+            {PALETTE.map(c => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => { setColor(c); setIsDirty(true) }}
+                className={`${styles.swatch} ${color === c ? styles.swatchActive : ''}`}
+                style={{ '--sw': c } as React.CSSProperties}
+                title={c}
+              />
+            ))}
           </div>
           <div className={styles.tagsRow}>
             <span className={styles.tagsLabel}>Tags:</span>

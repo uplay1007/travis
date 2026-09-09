@@ -8,6 +8,7 @@ import {
   useNodesState,
   useEdgesState,
   useNodesInitialized,
+  useNodes,
   useReactFlow,
   useUpdateNodeInternals,
   type Node,
@@ -18,19 +19,22 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import type { Schema, Table, Column, Layout } from './types/schema'
+import type { Schema, Table, Column, Layout, TableType } from './types/schema'
 import { computeLayout } from './utils/layout'
-import { tableColor, tagColor } from './utils/colors'
+import { tableAccent } from './utils/colors'
 import {
   saveCurrentSession, loadCurrentSession, clearCurrentSession, saveDB,
 } from './utils/storage'
-import { TableNode, type TableNodeData, MultiSelectCtx } from './components/canvas/TableNode'
+import { TableNode, type TableNodeData } from './components/canvas/TableNode'
 import { HighlightCtx, type HighlightCtxValue } from './contexts/highlight'
 import { EdgeHoverCtx, type EdgeEndpoint } from './contexts/edgeHover'
 import { ViewModeCtx, type ViewMode, type ViewModeCtxValue } from './contexts/viewMode'
 import { ThemeCtx } from './contexts/theme'
 import { OrthoEdge, type OrthoEdgeData } from './components/canvas/OrthoEdge'
-import type { Side } from './utils/orthoRoute'
+import {
+  routeOrtho, spreadOverlappingSegments,
+  type Side, type Pt, type Rect as OrthoRect,
+} from './utils/orthoRoute'
 import { computeELKLayout } from './services/layoutService'
 import { resolveOverlaps, type Rect } from './utils/separateNodes'
 import { TableEditor } from './components/editor/TableEditor'
@@ -42,6 +46,7 @@ import { exportSQL } from './utils/parsers/sql'
 import { schemaToStructured } from './utils/structuredJSON'
 import { exportDrawio, type DrawioPage } from './utils/drawioExport'
 import { T, type Lang } from './i18n'
+import { TABLE_TYPES } from './utils/tableTypes'
 import { DialogProvider, useDialog } from './contexts/DialogContext'
 import { Logo } from './components/ui/Logo'
 import { ThemeSwitch } from './components/ui/ThemeSwitch'
@@ -49,6 +54,27 @@ import appStyles from './App.module.css'
 
 const NODE_TYPES = { table: TableNode }
 const EDGE_TYPES = { fk: OrthoEdge }
+
+interface NodeSize { width: number; height: number }
+
+// React Flow v12 keeps each node's measured size in its own store and never
+// reports it back through onNodesChange, so the `nodes` state App owns has no
+// `measured` at all — everything reading it silently fell back to a uniform
+// 280x120 (ELK's height input, overlap resolution, edge obstacles). This
+// child sits inside <ReactFlow>, where the store is reachable, and mirrors
+// the real sizes back out.
+function NodeMeasureSync({ onMeasured }: { onMeasured: (sizes: Record<string, NodeSize>) => void }) {
+  const nodes = useNodes()
+  useEffect(() => {
+    const sizes: Record<string, NodeSize> = {}
+    for (const n of nodes) {
+      const m = n.measured
+      if (m?.width && m?.height) sizes[n.id] = { width: m.width, height: m.height }
+    }
+    onMeasured(sizes)
+  }, [nodes, onMeasured])
+  return null
+}
 
 function NodesInitializedFitView({ rfRef }: {
   rfRef: React.RefObject<ReactFlowInstance<any, any> | null>
@@ -141,6 +167,29 @@ function addedToLayoutMsg(layoutName: string, names: string[], lang: Lang): stri
 // set for this view yet" don't manufacture a fresh Set (and a fresh render)
 // on every call
 const EMPTY_TAG_SET: ReadonlySet<string> = new Set()
+const EMPTY_TYPE_SET: ReadonlySet<TableType> = new Set()
+
+const VIEW_MODES: { value: ViewMode; en: string; ru: string }[] = [
+  { value: 'full',      en: 'Full',      ru: 'Полный' },
+  { value: 'compact',   en: 'Compact',   ru: 'Компактный' },
+  { value: 'collapsed', en: 'Collapsed', ru: 'Свёрнутый' },
+]
+
+// Close a toolbar dropdown when the next mousedown lands outside its pill.
+function useCloseOnOutsideClick(
+  open: boolean,
+  ref: React.RefObject<HTMLElement | null>,
+  close: () => void,
+) {
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as globalThis.Node)) close()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open, ref, close])
+}
 
 interface TableRect { x: number; y: number; width: number; height: number }
 
@@ -336,8 +385,8 @@ function schemaToFlow(
           label: `${col.name} → ${col.foreignKey.column}`,
           color: '#4b5563',
           relType: getRelType(table, col),
-          sourceColor: tagColor(table.tags),
-          targetColor: tagColor(targetTable.tags),
+          sourceColor: tableAccent(table),
+          targetColor: tableAccent(targetTable),
           sourceColumn: col.name,
           targetColumn: col.foreignKey.column,
         } satisfies OrthoEdgeData,
@@ -412,6 +461,23 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   const nodesRef = useRef<Node[]>([])
   useEffect(() => { nodesRef.current = nodes }, [nodes])
 
+  // Real per-node sizes, mirrored out of React Flow's store by NodeMeasureSync.
+  // Kept in a ref for callbacks; the version counter is what memos depend on,
+  // and it only ticks when a size actually changed (otherwise mirroring would
+  // feed its own re-render loop).
+  const sizesRef = useRef<Record<string, NodeSize>>({})
+  const [sizesVersion, setSizesVersion] = useState(0)
+  const handleMeasured = useCallback((sizes: Record<string, NodeSize>) => {
+    const prev = sizesRef.current
+    const keys = Object.keys(sizes)
+    const unchanged = keys.length === Object.keys(prev).length &&
+      keys.every(k => prev[k]?.width === sizes[k].width && prev[k]?.height === sizes[k].height)
+    if (unchanged) return
+    sizesRef.current = sizes
+    setSizesVersion(v => v + 1)
+  }, [])
+  const sizeOf = useCallback((id: string): NodeSize => sizesRef.current[id] ?? { width: 280, height: 120 }, [])
+
   const masterPositionsRef = useRef<Record<string, { x: number; y: number }>>(session?.positions ?? {})
 
   const [editorState, setEditorState] = useState<EditorState>(null)
@@ -430,6 +496,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // tables hidden via the selection toolbar's Hide button — session-only
   // (never persisted/exported/saved), keyed per view for the same reason
   const [hiddenTables, setHiddenTables] = useState<Record<string, Set<string>>>({})
+  // table-type (reference/master/fact/…) filter — like the group filter it's
+  // per view, but it's a pure show/hide overlay (see typeHidden): checking a
+  // type must not re-arrange the canvas underneath the way a tag change does.
+  const [typeFilters, setTypeFilters] = useState<Record<string, Set<TableType>>>({})
+  const [typesOpen, setTypesOpen] = useState(false)
+  const typesBtnRef = useRef<HTMLDivElement>(null)
+  const [viewModeOpen, setViewModeOpen] = useState(false)
+  const viewModeBtnRef = useRef<HTMLDivElement>(null)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [activeLayoutId, setActiveLayoutId] = useState<string | null>(null)
   // mirror of activeLayoutId for use inside save callbacks without dep churn
@@ -501,7 +575,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     window.addEventListener('mouseup', onUp)
   }, [])
 
-  const [multiSelectActive, setMultiSelectActive] = useState(false)
   const [highlightTable, setHighlightTable] = useState<string | null>(null)
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set())
   const [layouting, setLayouting] = useState(false)
@@ -517,6 +590,23 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // per view instead of being single shared pieces of state
   const activeTagFilter = activeLayoutId ? (layoutTagFilters[activeLayoutId] ?? EMPTY_TAG_SET) : baseTagFilter
   const currentHidden = hiddenTables[viewKey] ?? EMPTY_TAG_SET
+  const activeTypeFilter = typeFilters[viewKey] ?? EMPTY_TYPE_SET
+
+  // Tables filtered out by the type filter. Kept separate from the tag filter
+  // (which re-frames the base view) and folded in with the manual Hide set
+  // instead, so ticking a type only shows/hides — it never moves a table.
+  const typeHidden = useMemo(() => {
+    if (!schema || activeTypeFilter.size === 0) return EMPTY_TAG_SET
+    return new Set(schema.tables.filter(t => !t.type || !activeTypeFilter.has(t.type)).map(t => t.name))
+  }, [schema, activeTypeFilter])
+
+  // everything not drawn in this view for a show/hide reason (manual Hide +
+  // type filter) — the tag filter is handled separately via scopedVisibleNames
+  const hiddenNames = useMemo(() => {
+    if (typeHidden.size === 0) return currentHidden
+    if (currentHidden.size === 0) return typeHidden
+    return new Set([...currentHidden, ...typeHidden])
+  }, [currentHidden, typeHidden])
 
   // Table names visible in the current view before the Hide toggle is
   // applied: layout membership (if any) narrowed by that view's selected
@@ -549,27 +639,27 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       const pos = layoutPosRef.current[activeLayout.id] ?? {}
       return nodes.map(n => ({
         ...n,
-        hidden: !scopedVisibleNames?.has(n.id) || currentHidden.has(n.id),
+        hidden: !scopedVisibleNames?.has(n.id) || hiddenNames.has(n.id),
         position: pos[n.id] ?? n.position,
       }))
     }
     if (!scopedVisibleNames) {
       return nodes.map(n => ({
         ...n,
-        hidden: currentHidden.has(n.id),
+        hidden: hiddenNames.has(n.id),
         position: masterPositionsRef.current[n.id] ?? n.position
       }))
     }
-    return nodes.map(n => ({ ...n, hidden: !scopedVisibleNames.has(n.id) || currentHidden.has(n.id) }))
-  }, [nodes, scopedVisibleNames, currentHidden, activeLayout])
+    return nodes.map(n => ({ ...n, hidden: !scopedVisibleNames.has(n.id) || hiddenNames.has(n.id) }))
+  }, [nodes, scopedVisibleNames, hiddenNames, activeLayout])
 
   const displayEdges = useMemo(() => {
     let visibleEdges = edges
     if (scopedVisibleNames) {
       visibleEdges = visibleEdges.filter(e => scopedVisibleNames.has(e.source) && scopedVisibleNames.has(e.target))
     }
-    if (currentHidden.size > 0) {
-      visibleEdges = visibleEdges.filter(e => !currentHidden.has(e.source) && !currentHidden.has(e.target))
+    if (hiddenNames.size > 0) {
+      visibleEdges = visibleEdges.filter(e => !hiddenNames.has(e.source) && !hiddenNames.has(e.target))
     }
 
     // re-pick each edge's connection side and exact anchor point against the
@@ -577,13 +667,36 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     // pickBestSides/fanOutSideAnchors
     const rects = new Map<string, TableRect>()
     for (const n of displayNodes) {
-      const m = n.measured as { width?: number; height?: number } | undefined
-      rects.set(n.id, { x: n.position.x, y: n.position.y, width: m?.width ?? 280, height: m?.height ?? 120 })
+      const s = sizeOf(n.id)
+      rects.set(n.id, { x: n.position.x, y: n.position.y, width: s.width, height: s.height })
     }
     const anchors = fanOutSideAnchors(
       visibleEdges.map(e => ({ id: e.id, sourceId: e.source, targetId: e.target })),
       rects,
     )
+
+    // Route every edge here rather than inside each OrthoEdge: two different
+    // edges' paths can end up running along the exact same line mid-route
+    // (fanOutSideAnchors only spreads where they ATTACH), and spotting that
+    // needs all the routes at once — see spreadOverlappingSegments.
+    const obstacles: { id: string; rect: OrthoRect }[] = []
+    for (const n of displayNodes) {
+      if (n.hidden) continue
+      const r = rects.get(n.id)
+      if (r) obstacles.push({ id: n.id, rect: { x: r.x, y: r.y, width: r.width, height: r.height } })
+    }
+    const routes = new Map<string, Pt[]>()
+    for (const e of visibleEdges) {
+      const a = anchors.get(e.id)
+      if (!a) continue
+      const pts = routeOrtho(
+        a.sourcePoint, a.sourceSide, a.targetPoint, a.targetSide,
+        obstacles.filter(o => o.id !== e.source && o.id !== e.target).map(o => o.rect),
+      )
+      if (pts) routes.set(e.id, pts)
+    }
+    const spread = spreadOverlappingSegments(routes)
+
     return visibleEdges.map(e => {
       const a = anchors.get(e.id)
       if (!a) return e
@@ -597,10 +710,12 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
           targetPoint: a.targetPoint,
           sourceSide: a.sourceSide,
           targetSide: a.targetSide,
+          points: spread.get(e.id),
         } satisfies OrthoEdgeData,
       }
     })
-  }, [edges, scopedVisibleNames, currentHidden, displayNodes])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sizesVersion stands in for sizesRef
+  }, [edges, scopedVisibleNames, hiddenNames, displayNodes, sizeOf, sizesVersion])
 
   // React Flow's native selection (marquee, click, shift-click) is the single
   // source of truth. A multi-selection becomes the highlighted group; a single
@@ -617,7 +732,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     // group intact through a drag; real "clear everything" already goes
     // through onPaneClick.
     if (ids.length === 0) return
-    setMultiSelectActive(ids.length > 1)
     if (ids.length > 1) {
       setSelectedTables(new Set(ids))
       setHighlightTable(null)
@@ -656,23 +770,41 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([tag, count]) => ({ tag, count }))
   }, [schema, activeLayout])
 
-  useEffect(() => {
-    if (!groupsOpen) return
-    const handler = (e: MouseEvent) => {
-      if (!groupsBtnRef.current?.contains(e.target as globalThis.Node)) setGroupsOpen(false)
+  // Table types actually present in the current view — same "no dead
+  // controls" scoping as scopedTags above.
+  const scopedTypes = useMemo(() => {
+    if (!schema) return []
+    const source = activeLayout
+      ? schema.tables.filter(t => activeLayout.tables.includes(t.name))
+      : schema.tables
+    const counts = {} as Record<TableType, number>
+    for (const t of source) {
+      if (t.type) counts[t.type] = (counts[t.type] ?? 0) + 1
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [groupsOpen])
+    return TABLE_TYPES.filter(tt => counts[tt.value]).map(tt => ({ ...tt, count: counts[tt.value] }))
+  }, [schema, activeLayout])
 
-  useEffect(() => {
-    if (!layoutsOpen) return
-    const handler = (e: MouseEvent) => {
-      if (!layoutsBtnRef.current?.contains(e.target as globalThis.Node)) setLayoutsOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [layoutsOpen])
+  const toggleActiveType = useCallback((type: TableType) => {
+    setTypeFilters(prev => {
+      const next = new Set(prev[viewKey] ?? [])
+      if (next.has(type)) next.delete(type); else next.add(type)
+      return { ...prev, [viewKey]: next }
+    })
+  }, [viewKey])
+
+  const clearActiveTypeFilter = useCallback(() => {
+    setTypeFilters(prev => {
+      if (!prev[viewKey]?.size) return prev
+      const next = { ...prev }
+      delete next[viewKey]
+      return next
+    })
+  }, [viewKey])
+
+  useCloseOnOutsideClick(groupsOpen, groupsBtnRef, useCallback(() => setGroupsOpen(false), []))
+  useCloseOnOutsideClick(layoutsOpen, layoutsBtnRef, useCallback(() => setLayoutsOpen(false), []))
+  useCloseOnOutsideClick(typesOpen, typesBtnRef, useCallback(() => setTypesOpen(false), []))
+  useCloseOnOutsideClick(viewModeOpen, viewModeBtnRef, useCallback(() => setViewModeOpen(false), []))
 
   // Toggle one tag's membership in the current view's filter set (OR
   // semantics: a table shows if it matches ANY checked tag). "All tables" and
@@ -737,8 +869,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     const heights: Record<string, number> = {}
     if (viewMode !== 'collapsed') {
       nodesRef.current.forEach(n => {
-        const h = (n.measured as { height?: number } | undefined)?.height
-        if (h) heights[n.id] = h
+        heights[n.id] = sizeOf(n.id).height
       })
     }
 
@@ -791,7 +922,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     }
     if (!mods.alt || !schema) return
     const visibleTables = schema.tables.filter(t =>
-      (!scopedVisibleNames || scopedVisibleNames.has(t.name)) && !currentHidden.has(t.name)
+      (!scopedVisibleNames || scopedVisibleNames.has(t.name)) && !hiddenNames.has(t.name)
     )
     // Set the group directly rather than through React Flow selection: with no
     // exclusive satellites this is just the clicked table, and routing a
@@ -801,7 +932,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     // focus + its exclusive satellites light up.
     setHighlightTable(name)
     setSelectedTables(new Set([name, ...exclusiveNeighbors(visibleTables, name)]))
-  }, [schema, scopedVisibleNames, currentHidden, highlightTable])
+  }, [schema, scopedVisibleNames, hiddenNames, highlightTable])
 
   const highlightCtxValue = useMemo((): HighlightCtxValue => {
     // manual selection mode takes precedence over neighbor highlight
@@ -831,8 +962,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       const heights: Record<string, number> = {}
       if (viewMode !== 'collapsed') {
         nodesRef.current.forEach(n => {
-          const h = (n.measured as { height?: number } | undefined)?.height
-          if (h) heights[n.id] = h
+          heights[n.id] = sizeOf(n.id).height
         })
       }
       const filter = activeLayout ? new Set(activeLayout.tables) : undefined
@@ -865,11 +995,11 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       ? nodes.filter(n => schema.tables.find(t => t.name === n.id)?.tags?.some(tag => baseTagFilter.has(tag)))
       : nodes
     if (visibleNodes.length === 0) return
-    const measuredCount = visibleNodes.filter(n => (n.measured as { height?: number } | undefined)?.height).length
-    if (measuredCount < visibleNodes.length) return
+    if (visibleNodes.some(n => !sizesRef.current[n.id])) return
     setPendingELK(false)
     handleLayout()
-  }, [pendingELK, nodes, layouting, handleLayout, baseTagFilter, schema])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sizesVersion stands in for sizesRef
+  }, [pendingELK, nodes, layouting, handleLayout, baseTagFilter, schema, sizesVersion])
 
   // persist a dragged position to the active view: layout ref, else master
   // (tag-filter view is ephemeral — no persistence)
@@ -930,7 +1060,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     }))
   }, [highlightCtxValue.groupMode, highlightCtxValue.highlighted, setNodes, persistPos])
 
-  const handleNodeDragStop = useCallback((_e: MouseEvent | TouchEvent, node: Node) => {
+  // Push apart tables that ended up overlapping, from their current on-screen
+  // positions and measured sizes. Nodes in `pinned` stay put.
+  const separateOverlaps = useCallback((pinned: Set<string>) => {
     const current = nodesRef.current
     if (current.length === 0) return
 
@@ -940,15 +1072,12 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     const rects = new Map<string, Rect>()
     for (const n of current) {
       if (visibleSet && !visibleSet.has(n.id)) continue
-      const m = n.measured as { width?: number; height?: number } | undefined
+      const s = sizeOf(n.id)
       const p = resolvedPosition(n)
-      rects.set(n.id, { x: p.x, y: p.y, w: m?.width ?? 280, h: m?.height ?? 120 })
+      rects.set(n.id, { x: p.x, y: p.y, w: s.width, h: s.height })
     }
 
-    // pin only the grabbed node; everything else (incl. highlighted FK
-    // neighbors that moved with it) is pushable, so overlaps within the
-    // highlighted group get resolved too
-    const resolved = resolveOverlaps(rects, new Set([node.id]))
+    const resolved = resolveOverlaps(rects, pinned)
 
     resolved.forEach((p, id) => persistPos(id, p))
     setNodes(prev => prev.map(n => {
@@ -957,6 +1086,33 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       return { ...n, position: p }
     }))
   }, [setNodes, persistPos, activeLayout, resolvedPosition])
+
+  const handleNodeDragStop = useCallback((_e: MouseEvent | TouchEvent, node: Node) => {
+    // pin only the grabbed node; everything else (incl. highlighted FK
+    // neighbors that moved with it) is pushable, so overlaps within the
+    // highlighted group get resolved too
+    separateOverlaps(new Set([node.id]))
+  }, [separateOverlaps])
+
+  // Switching detail level changes every card's height, so tables that sat
+  // clear of each other in Collapsed can overlap in Full. Dragging used to be
+  // the only thing that resolved overlaps — run a pass here too, once the
+  // 0.28s fold/unfold animation has settled and the nodes are re-measured.
+  // Nothing is pinned: no single table is "the one you grabbed" here.
+  const separateOverlapsRef = useRef(separateOverlaps)
+  useEffect(() => { separateOverlapsRef.current = separateOverlaps })
+  const prevBulkKeyRef = useRef(bulkKey)
+  useEffect(() => {
+    // the guard only skips the initial mount; it's marked seen inside the
+    // timeout, not before it, so StrictMode's double-invoke (mount, cleanup,
+    // re-mount) doesn't cancel the only run and then skip the retry
+    if (bulkKey === prevBulkKeyRef.current) return
+    const t = setTimeout(() => {
+      prevBulkKeyRef.current = bulkKey
+      separateOverlapsRef.current(new Set())
+    }, 600)
+    return () => clearTimeout(t)
+  }, [bulkKey])
 
   // ── Layouts ────────────────────────────────────────────────────────────
   const selectLayout = useCallback((id: string | null) => {
@@ -1010,8 +1166,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
 
     const heights: Record<string, number> = {}
     nodesRef.current.forEach(n => {
-      const h = (n.measured as { height?: number } | undefined)?.height
-      if (h) heights[n.id] = h
+      heights[n.id] = sizeOf(n.id).height
     })
 
     const { positions: newPositions } = await computeELKLayout(schema, heights, new Set(newNames))
@@ -1021,7 +1176,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     for (const name of target.tables) {
       const p = existingPos[name]
       if (!p) continue
-      const w = (nodesRef.current.find(n => n.id === name)?.measured as { width?: number } | undefined)?.width ?? 280
+      const w = sizeOf(name).width
       maxX = any ? Math.max(maxX, p.x + w) : p.x + w
       minY = any ? Math.min(minY, p.y) : p.y
       any = true
@@ -1033,8 +1188,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     for (const name of target.tables) {
       const p = existingPos[name]
       if (!p) continue
-      const m = nodesRef.current.find(n => n.id === name)?.measured as { width?: number; height?: number } | undefined
-      rects.set(name, { x: p.x, y: p.y, w: m?.width ?? 280, h: m?.height ?? 120 })
+      const s = sizeOf(name)
+      rects.set(name, { x: p.x, y: p.y, w: s.width, h: s.height })
     }
     for (const name of newNames) {
       const p = newPositions[name]
@@ -1477,17 +1632,79 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
             )}
           </div>
 
-          {/* View mode */}
-          <div className={appStyles.toolPill}>
-            <select
-              value={viewMode}
-              onChange={e => handleViewMode(e.target.value as ViewMode)}
-              className={appStyles.viewSelect}
+          {/* Types — show/hide by architectural table type (see typeHidden) */}
+          <div className={appStyles.groupsPill} ref={typesBtnRef}>
+            <button
+              onClick={() => setTypesOpen(o => !o)}
+              className={`${appStyles.groupsBtn} ${activeTypeFilter.size > 0 ? appStyles.groupsBtnFiltered : ''}`}
             >
-              <option value="full">Full</option>
-              <option value="compact">Compact</option>
-              <option value="collapsed">Collapsed</option>
-            </select>
+              <span className={appStyles.toolBtnIcon}>▤</span>
+              <span className={appStyles.toolBtnLabel}>
+                {activeTypeFilter.size > 0
+                  ? (lang === 'ru' ? `Типов: ${activeTypeFilter.size}` : `${activeTypeFilter.size} types`)
+                  : (lang === 'ru' ? 'Типы' : 'Types')}
+              </span>
+              <span className={appStyles.groupsChevron}>▼</span>
+            </button>
+            {typesOpen && (
+              <div className={appStyles.groupsDropdown}>
+                <button
+                  onClick={clearActiveTypeFilter}
+                  className={`${appStyles.groupsAllBtn} ${activeTypeFilter.size === 0 ? appStyles.groupsAllBtnActive : ''}`}
+                >
+                  <span>{lang === 'ru' ? 'Все типы' : 'All types'}</span>
+                  {activeTypeFilter.size === 0 && <span>✓</span>}
+                </button>
+                <div className={appStyles.groupsDivider} />
+                {scopedTypes.length === 0 && (
+                  <div className={appStyles.layoutEmpty}>
+                    {lang === 'ru' ? 'Типы не заданы' : 'No types set'}
+                  </div>
+                )}
+                {scopedTypes.map(tt => (
+                  <button
+                    key={tt.value}
+                    onClick={() => toggleActiveType(tt.value)}
+                    className={`${appStyles.groupsTagBtn} ${activeTypeFilter.has(tt.value) ? appStyles.groupsTagBtnActive : ''}`}
+                  >
+                    <div className={appStyles.groupsTagLeft}>
+                      <span className={`${appStyles.groupsCheckbox} ${activeTypeFilter.has(tt.value) ? appStyles.groupsCheckboxChecked : ''}`}>
+                        {activeTypeFilter.has(tt.value) && '✓'}
+                      </span>
+                      <span>{lang === 'ru' ? tt.ru : tt.en}</span>
+                    </div>
+                    <span className={appStyles.groupsTagCount}>{tt.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* View mode — custom dropdown rather than a native <select>, whose
+              option list is drawn by the OS and looks foreign next to the
+              rest of the (fully custom) toolbar */}
+          <div className={appStyles.groupsPill} ref={viewModeBtnRef}>
+            <button
+              onClick={() => setViewModeOpen(o => !o)}
+              className={appStyles.groupsBtn}
+            >
+              <span className={appStyles.toolBtnLabel}>{VIEW_MODES.find(m => m.value === viewMode)?.[lang]}</span>
+              <span className={appStyles.groupsChevron}>▼</span>
+            </button>
+            {viewModeOpen && (
+              <div className={`${appStyles.groupsDropdown} ${appStyles.groupsDropdownNarrow}`}>
+                {VIEW_MODES.map(m => (
+                  <button
+                    key={m.value}
+                    onClick={() => { handleViewMode(m.value); setViewModeOpen(false) }}
+                    className={`${appStyles.groupsAllBtn} ${viewMode === m.value ? appStyles.groupsAllBtnActive : ''}`}
+                  >
+                    <span>{m[lang]}</span>
+                    {viewMode === m.value && <span>✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Layouts */}
@@ -1758,7 +1975,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
               <ViewModeCtx.Provider value={{ mode: viewMode, bulkExpand, bulkKey }}>
                 <HighlightCtx.Provider value={highlightCtxValue}>
                  <EdgeHoverCtx.Provider value={edgeHoverCtxValue}>
-                  <MultiSelectCtx.Provider value={multiSelectActive}>
                     <ReactFlow
                       nodes={displayNodes}
                       edges={displayEdges}
@@ -1785,6 +2001,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
                       onInit={instance => { rfInstanceRef.current = instance }}
                     >
                       <NodesInitializedFitView rfRef={rfInstanceRef} />
+                      <NodeMeasureSync onMeasured={handleMeasured} />
                       <Background color={theme === 'dark' ? '#1a1d27' : '#dde0e6'} gap={20} />
                       <Controls
                         showInteractive={false}
@@ -1792,11 +2009,10 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
                       />
                       <MiniMap
                         style={{ background: 'var(--bg-panel)', borderRadius: 16, border: '1px solid rgba(var(--overlay-rgb),0.08)', overflow: 'hidden' }}
-                        nodeColor={n => tagColor((n.data as { table?: { tags?: string[] } }).table?.tags)}
+                        nodeColor={n => tableAccent((n.data as TableNodeData).table)}
                         maskColor="rgba(0,0,0,0.6)"
                       />
                     </ReactFlow>
-                  </MultiSelectCtx.Provider>
                  </EdgeHoverCtx.Provider>
                 </HighlightCtx.Provider>
               </ViewModeCtx.Provider>
@@ -1915,7 +2131,7 @@ function AddTableCard({ table, selected, onClick }: {
   selected: boolean
   onClick: (e: React.MouseEvent) => void
 }) {
-  const accent = tagColor(table.tags)
+  const accent = tableAccent(table)
   const cols = [
     ...table.columns.filter(c => c.primaryKey),
     ...table.columns.filter(c => c.foreignKey && !c.primaryKey),

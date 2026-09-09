@@ -21,6 +21,9 @@ export interface Table {
   columns: Column[]
   tags?: string[]
   type?: TableType
+  // manual accent override (hex); when absent the accent is derived from the
+  // first tag / the table name — see utils/colors.ts
+  color?: string
 }
 
 export interface Layout {
