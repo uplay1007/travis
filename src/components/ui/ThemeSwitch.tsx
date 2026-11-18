@@ -11,6 +11,7 @@ export function ThemeSwitch({ theme, onToggle }: Props) {
       <label className={styles.label}>
         <input
           type="checkbox"
+          aria-label="Light theme"
           className={styles.checkbox}
           checked={theme === 'light'}
           onChange={onToggle}

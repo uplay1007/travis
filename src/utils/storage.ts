@@ -9,6 +9,7 @@ export interface CurrentSession {
   schema: Schema
   positions: Record<string, { x: number; y: number }>
   activeLayoutId?: string | null   // layout the user was viewing, restored on reload
+  namedSave?: { id: string; name: string }
 }
 
 export function saveCurrentSession(data: Omit<CurrentSession, 'v'>) {

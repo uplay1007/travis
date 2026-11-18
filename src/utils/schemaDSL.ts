@@ -12,10 +12,13 @@ const KNOWN_TYPES = new Set([
   // string
   'varchar', 'char', 'character', 'varying', 'text', 'tinytext', 'mediumtext', 'longtext',
   'string', 'nvarchar', 'nchar', 'citext',
+  'character varying', 'char varying', 'national character', 'national character varying',
   // boolean
   'boolean', 'bool', 'bit',
   // date / time
   'date', 'datetime', 'timestamp', 'timestamptz', 'time', 'timetz', 'year', 'interval',
+  'timestamp with time zone', 'timestamp without time zone',
+  'time with time zone', 'time without time zone', 'double precision', 'bit varying',
   // uuid / json / xml
   'uuid', 'json', 'jsonb', 'xml',
   // binary
@@ -25,7 +28,8 @@ const KNOWN_TYPES = new Set([
 ])
 
 function isKnownType(type: string): boolean {
-  return KNOWN_TYPES.has(type.replace(/\(.*$/, '').toLowerCase())
+  const baseType = type.replace(/\([^)]*\)|\[\d*\]/g, '').trim().replace(/\s+/g, ' ').toLowerCase()
+  return KNOWN_TYPES.has(baseType)
 }
 
 export interface DSLDiagnostic { line: number; message: string }
@@ -151,9 +155,9 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
     if (mode === 'table') {
       if (line === '}') { mode = 'none'; cur = null; curCols = null; continue }
       if (line.includes('>')) diagnostics.push({ line: lineNo, message: `Put relations in the Relations { } block, not inside a table` })
-      const tokens = line.split(/\s+/)
-      const colName = tokens[0]
-      const colType = tokens[1]
+      const [, colName, definition = ''] = /^(\S+)(?:\s+(.+))?$/.exec(line)!
+      const modifiers = /(?:\s+(?:pk|unique|null))+$/.exec(definition)
+      const colType = modifiers ? definition.slice(0, modifiers.index) : definition
       if (!IDENT.test(colName)) diagnostics.push({ line: lineNo, message: `Invalid column name "${colName}" — latin letters, digits and _ only` })
       else if (!colType) diagnostics.push({ line: lineNo, message: `Column "${colName}" is missing a type` })
       else if (!isKnownType(colType)) diagnostics.push({ line: lineNo, message: `Unknown type "${colType}" for column "${colName}"` })
@@ -161,7 +165,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
         if (curCols.has(colName)) diagnostics.push({ line: lineNo, message: `Duplicate column "${colName}" in "${cur.name}"` })
         curCols.add(colName)
         const col: Column = { name: colName, type: colType ?? 'varchar' }
-        for (const f of tokens.slice(2)) {
+        for (const f of modifiers?.[0].trim().split(/\s+/) ?? []) {
           if (f === 'pk') col.primaryKey = true
           else if (f === 'unique') col.unique = true
           else if (f === 'null') col.nullable = true

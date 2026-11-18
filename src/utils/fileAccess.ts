@@ -5,17 +5,17 @@ export function supportsFileSystemAccess(): boolean {
   return typeof window !== 'undefined' && 'showOpenFilePicker' in window
 }
 
-export async function openFilePicker(accept: string[]): Promise<{ file: File; handle: FileSystemFileHandle } | null> {
+export async function openFilePicker(accept: readonly string[]): Promise<FileSystemFileHandle | null> {
   try {
     // @ts-expect-error - File System Access API not yet in lib.dom.d.ts
     const [handle]: FileSystemFileHandle[] = await window.showOpenFilePicker({
-      types: [{ description: 'Schema files', accept: { 'text/plain': accept } }],
+      types: [{ description: 'Schema files', accept: { 'text/plain': [...accept] } }],
       multiple: false,
     })
-    const file = await handle.getFile()
-    return { file, handle }
-  } catch {
-    return null // user cancelled
+    return handle
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return null
+    throw error
   }
 }
 

@@ -1,7 +1,7 @@
 <h1 align="center">🗺️ TraVis - Trace and Visualize</h1>
 
 <p align="center">
-  <b>Paste a schema. Get a map.</b><br/>
+  <b>Open a schema. Get a map.</b><br/>
   Turn SQL, Prisma, Django, TypeORM or SQLAlchemy into an interactive diagram you can
   drag, group, and reshape — right in the browser.
 </p>
@@ -30,7 +30,7 @@ database, onboarding onto a legacy one, or arguing about a model with your team.
 - **🧭 Auto-layout** — ELK arranges even a 30-table schema into a readable map on first load, with per-column ports so foreign keys land on the exact row they join instead of bunching at one point. Or hit **Organize** anytime.
 - **🔦 Trace relationships** — click a table to spotlight everything it's linked to; hover an edge to light up the exact columns it joins.
 - **🎯 Focused views** — `Shift`-click to hand-pick tables, `⌥`-click to grab a table and its private satellites, then save them as named **layouts** — each with its own positions *and* detail level.
-- **✏️ Edit live** — a visual table editor **and** a two-pane DSL editor that validates as you type: bad types, broken relations, or Cyrillic names underline the culprit and freeze the canvas until you fix it.
+- **✏️ Edit live** — use the visual table editor or open **Schema** to edit the DSL alongside the canvas. Invalid drafts are highlighted and the canvas keeps the last valid schema.
 - **🏷️ Table roles** — tag a table's architectural role (reference, master, transactional, link, dimension, fact) for a quick read on how a schema is shaped.
 - **💾 Local-first** — no login, no server. Your schema lives in the browser and on disk; nothing leaves your machine.
 - **↔️ Round-trip export** — write back to SQL DDL or a clean, structured JSON.
@@ -45,7 +45,7 @@ npm install
 npm run dev
 ```
 
-Then drop in a schema file — or paste one straight into the box.
+Choose **Create a schema** to start on a blank canvas, or **Open a schema** to choose a file or drop it onto the card.
 
 ## 🔌 Formats
 

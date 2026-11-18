@@ -1,8 +1,7 @@
-import { useState, useCallback } from 'react'
-import { parseSchema, detectParser, type ParserType } from '../../utils/parsers'
-import { openFilePicker, getHandleFromDrop, supportsFileSystemAccess } from '../../utils/fileAccess'
+import { useRef, useState } from 'react'
+import { detectParser, parseSchema, schemaFileExtensions } from '../../utils/parsers'
+import { getHandleFromDrop, openFilePicker, supportsFileSystemAccess } from '../../utils/fileAccess'
 import { getSaves, deleteDB, type SavedDB } from '../../utils/storage'
-import { tableColor } from '../../utils/colors'
 import { T, type Lang } from '../../i18n'
 import type { Schema } from '../../types/schema'
 import { Logo } from '../ui/Logo'
@@ -32,178 +31,169 @@ function fmtDate(iso: string, lang: Lang) {
 
 export function UploadZone({ lang, theme, onThemeToggle, onOpen }: Props) {
   const t = T[lang]
-  const [parserType, setParserType] = useState<ParserType>('json')
+  const fileInput = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
   const [dragging, setDragging] = useState(false)
-  const [saves, setSaves] = useState<SavedDB[]>(() => getSaves())
+  const [isOpening, setIsOpening] = useState(false)
+  const [saves, setSaves] = useState<SavedDB[]>(getSaves)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
-  const hasFileAccess = supportsFileSystemAccess()
 
   const handleDeleteSave = (id: string) => {
     if (confirmDeleteId === id) {
       deleteDB(id)
-      setSaves(s => s.filter(x => x.id !== id))
+      setSaves(current => current.filter(save => save.id !== id))
       setConfirmDeleteId(null)
     } else {
       setConfirmDeleteId(id)
-      setTimeout(() => setConfirmDeleteId(prev => prev === id ? null : prev), 3000)
+      setTimeout(() => setConfirmDeleteId(current => current === id ? null : current), 3000)
     }
   }
 
-  const processText = useCallback(async (content: string, type: ParserType, handle?: FileSystemFileHandle) => {
+  const openSchema = async (file?: File, handleRequest?: Promise<FileSystemFileHandle | null>) => {
+    setError('')
+    setIsOpening(true)
     try {
-      const schema = parseSchema(content, type)
-      if (!schema.tables.length) throw new Error('No tables found')
-      setError('')
-      onOpen({ schema, fileHandle: handle })
-    } catch (e) {
-      setError((e as Error).message)
-    }
-  }, [onOpen])
-
-  const startNewProject = useCallback(() => {
-    onOpen({ schema: { tables: [] } })
-  }, [onOpen])
-
-  const handleOpenClick = useCallback(async () => {
-    if (hasFileAccess) {
-      const result = await openFilePicker(['.json', '.prisma', '.sql', '.ts', '.py'])
-      if (!result) return
-      const content = await result.file.text()
-      const type = detectParser(result.file.name, content)
-      setParserType(type)
-      processText(content, type, result.handle)
-    } else {
-      document.getElementById('file-input-fallback')?.click()
-    }
-  }, [hasFileAccess, processText])
-
-  const onFileFallback = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return
-    file.text().then(c => { const type = detectParser(file.name, c); setParserType(type); processText(c, type) })
-    e.target.value = ''
-  }, [processText])
-
-  const onDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault(); setDragging(false)
-    const handle = await getHandleFromDrop(e)
-    if (handle) {
-      const file = await handle.getFile()
+      const handle = await handleRequest
+      if (!file) file = await handle?.getFile()
+      if (!file) return
       const content = await file.text()
-      const type = detectParser(file.name, content)
-      setParserType(type)
-      processText(content, type, handle)
-    } else {
-      const file = e.dataTransfer.files[0]; if (!file) return
-      file.text().then(c => { const type = detectParser(file.name, c); setParserType(type); processText(c, type) })
+      const schema = parseSchema(content, detectParser(file.name, content))
+      if (!schema.tables.length) throw new Error(t.noTablesFound)
+      onOpen({ schema, fileHandle: handle ?? undefined })
+    } catch (error) {
+      setError(error instanceof Error ? error.message : t.fileReadError)
+    } finally {
+      setIsOpening(false)
     }
-  }, [processText])
+  }
+
+  const handleOpenClick = async () => {
+    if (supportsFileSystemAccess()) {
+      try {
+        const handle = await openFilePicker(schemaFileExtensions)
+        if (handle) await openSchema(undefined, Promise.resolve(handle))
+        return
+      } catch {
+        // Some browsers expose the native picker but block it in embedded pages.
+      }
+    }
+    fileInput.current?.click()
+  }
+
+  const onDrop = (event: React.DragEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    setDragging(false)
+    if (isOpening) return
+    // The browser releases the drag data store as soon as this event returns.
+    const file = event.dataTransfer.files[0]
+    if (file) void openSchema(file, getHandleFromDrop(event))
+  }
 
   return (
     <div className={styles.root}>
-      <div className={styles.nav}>
+      <header className={styles.nav}>
         <div className={styles.navBrand}>
           <Logo size={22} />
-          <span className={styles.navLogo}>TraVis</span>
+          <span>TraVis</span>
         </div>
-        <div className={styles.navRight}>
-          <ThemeSwitch theme={theme} onToggle={onThemeToggle} />
-        </div>
-      </div>
+        <ThemeSwitch theme={theme} onToggle={onThemeToggle} />
+      </header>
 
-      <div className={`${styles.body} ${saves.length > 0 ? styles.bodyTwoCol : ''}`}>
-        <div className={`${styles.leftCol} ${saves.length > 0 ? styles.leftColShared : ''}`}>
-          <div>
-            <h2 className={styles.heading}>Open schema</h2>
-            <p className={styles.subheading}>Upload an existing schema file, or start a new project</p>
-          </div>
+      <main className={styles.body}>
+        <h1 className={styles.heading}>{t.startHeading}</h1>
 
-          <div
-            onClick={handleOpenClick}
-            onDragOver={e => { e.preventDefault(); setDragging(true) }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-            className={`${styles.dropZone} ${dragging ? styles.dropZoneDragging : ''}`}
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className={`${styles.action} ${styles.createAction}`}
+            onClick={() => onOpen({ schema: { tables: [] } })}
+            disabled={isOpening}
+            aria-labelledby="create-schema-title"
+            aria-describedby="create-schema-hint"
           >
-            <input
-              id="file-input-fallback"
-              type="file"
-              className={styles.dropZoneHiddenInput}
-              onChange={onFileFallback}
-              accept=".json,.prisma,.sql,.ts,.py"
-            />
-            <div className={styles.dropZoneIcon}>📂</div>
-            <p className={styles.dropZoneText}>Drop file here or click to upload</p>
-            <p className={styles.dropZoneFormats}>.json · .prisma · .sql · .ts · .py</p>
-            {hasFileAccess && (
-              <span className={styles.dropZoneBadge}>✓ Direct file save supported</span>
-            )}
-          </div>
-
-          {error && <div className={styles.error}>{error}</div>}
-
-          <div className={styles.divider}>or</div>
-
-          <button onClick={startNewProject} className={`${styles.visualizeBtn} ${styles.visualizeBtnActive}`}>
-            Start new project →
+            <span className={`${styles.actionIcon} ${styles.createIcon}`} aria-hidden="true">+</span>
+            <span className={styles.actionArrow} aria-hidden="true">→</span>
+            <span id="create-schema-title" className={styles.actionTitle}>{t.createSchema}</span>
+            <span id="create-schema-hint" className={styles.actionHint}>{t.createSchemaHint}</span>
           </button>
+
+          <button
+            type="button"
+            className={`${styles.action} ${dragging ? styles.dropActive : ''}`}
+            onClick={handleOpenClick}
+            onDragOver={event => {
+              event.preventDefault()
+              if (!isOpening) setDragging(true)
+            }}
+            onDragLeave={event => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false)
+            }}
+            onDrop={onDrop}
+            disabled={isOpening}
+            aria-labelledby="open-schema-title"
+            aria-describedby="open-schema-hint open-schema-formats"
+          >
+            <span className={`${styles.actionIcon} ${styles.fileIcon}`} aria-hidden="true" />
+            <span className={styles.actionArrow} aria-hidden="true">→</span>
+            <span id="open-schema-title" className={styles.actionTitle}>{t.openSchema}</span>
+            <span id="open-schema-hint" className={styles.actionHint}>{t.openSchemaHint}</span>
+            <span id="open-schema-formats" className={styles.formats}>
+              {schemaFileExtensions.map(extension => <span key={extension}>{extension}</span>)}
+            </span>
+          </button>
+
+          <input
+            ref={fileInput}
+            type="file"
+            hidden
+            accept={schemaFileExtensions.join(',')}
+            onChange={event => {
+              const file = event.currentTarget.files?.[0]
+              event.currentTarget.value = ''
+              if (file) void openSchema(file)
+            }}
+          />
         </div>
+
+        {error && <p className={styles.error} role="alert">{error}</p>}
 
         {saves.length > 0 && (
-          <div className={styles.rightCol}>
-            <div>
-              <h2 className={styles.heading}>{t.savedSchemas}</h2>
-            </div>
-
-            <div className={styles.savesList}>
+          <section className={styles.recents} aria-labelledby="recent-projects">
+            <h2 id="recent-projects" className={styles.recentHeading}>{t.savedSchemas}</h2>
+            <ul className={styles.savesList}>
               {saves.map(save => {
                 const isConfirming = confirmDeleteId === save.id
                 return (
-                  <div key={save.id} className={styles.saveCard}>
-                    <div className={styles.saveCardTop}>
-                      <span className={styles.saveCardName}>{save.name}</span>
-                      <button
-                        onClick={() => handleDeleteSave(save.id)}
-                        className={`${styles.saveDeleteBtn} ${isConfirming ? styles.saveDeleteBtnConfirm : ''}`}
-                      >
-                        {isConfirming ? (lang === 'ru' ? 'Удалить?' : 'Confirm?') : '🗑️'}
-                      </button>
-                    </div>
-                    <div className={styles.saveTableTags}>
-                      {save.schema.tables.slice(0, 6).map(tbl => (
-                        <span
-                          key={tbl.name}
-                          className={styles.saveTableTag}
-                          style={{
-                            '--tag-bg': `${tableColor(tbl.name)}22`,
-                            '--tag-color': tableColor(tbl.name),
-                          } as React.CSSProperties}
-                        >
-                          {tbl.name}
-                        </span>
-                      ))}
-                      {save.schema.tables.length > 6 && (
-                        <span className={styles.saveTableTagExtra}>
-                          +{save.schema.tables.length - 6}
-                        </span>
-                      )}
-                    </div>
-                    <div className={styles.saveCardBottom}>
-                      <span className={styles.saveDate}>{fmtDate(save.savedAt, lang)}</span>
-                      <button
-                        onClick={() => onOpen({ schema: save.schema, positions: save.positions, saveId: save.id, saveName: save.name })}
-                        className={styles.openBtn}
-                      >
-                        {t.open}
-                      </button>
-                    </div>
-                  </div>
+                  <li key={save.id} className={styles.saveRow}>
+                    <button
+                      type="button"
+                      className={styles.openSave}
+                      onClick={() => onOpen({ schema: save.schema, positions: save.positions, saveId: save.id, saveName: save.name })}
+                      disabled={isOpening}
+                    >
+                      <span className={styles.saveIcon} aria-hidden="true">▤</span>
+                      <span className={styles.saveDetails}>
+                        <span className={styles.saveName}>{save.name}</span>
+                        <time dateTime={save.savedAt}>{fmtDate(save.savedAt, lang)}</time>
+                      </span>
+                      <span className={styles.openLabel}>{t.open} <span aria-hidden="true">→</span></span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`${styles.deleteSave} ${isConfirming ? styles.confirmDelete : ''}`}
+                      onClick={() => handleDeleteSave(save.id)}
+                      aria-label={isConfirming ? t.confirmDelete(save.name) : `${t.delete} ${save.name}`}
+                      title={t.delete}
+                    >
+                      {isConfirming ? (lang === 'ru' ? 'Удалить?' : 'Delete?') : '×'}
+                    </button>
+                  </li>
                 )
               })}
-            </div>
-          </div>
+            </ul>
+          </section>
         )}
-      </div>
+      </main>
     </div>
   )
 }

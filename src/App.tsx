@@ -423,6 +423,7 @@ function downloadSQL(schema: Schema, filename = 'schema.sql') {
 
 export default function App() {
   const [lang, setLang] = useState<Lang>('en')
+  const [projectKey, setProjectKey] = useState(0)
   const [theme, setTheme] = useState<'dark' | 'light'>(
     () => (localStorage.getItem('travis_theme') === 'light' ? 'light' : 'dark')
   )
@@ -431,30 +432,32 @@ export default function App() {
     localStorage.setItem('travis_theme', theme)
   }, [theme])
   const toggleTheme = useCallback(() => setTheme(t => (t === 'dark' ? 'light' : 'dark')), [])
+  const closeProject = useCallback(() => {
+    clearCurrentSession()
+    setProjectKey(key => key + 1)
+  }, [])
 
   return (
     <DialogProvider lang={lang}>
-      <AppContent lang={lang} setLang={setLang} theme={theme} onThemeToggle={toggleTheme} />
+      <AppContent key={projectKey} lang={lang} setLang={setLang} theme={theme} onThemeToggle={toggleTheme} onProjectExit={closeProject} />
     </DialogProvider>
   )
 }
 
-function AppContent({ lang, setLang, theme, onThemeToggle }: {
+function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   lang: Lang
   setLang: React.Dispatch<React.SetStateAction<Lang>>
   theme: 'dark' | 'light'
   onThemeToggle: () => void
+  onProjectExit: () => void
 }) {
   const session = useMemo(() => loadCurrentSession(), [])
   const dialog = useDialog()
 
   const [schema, setSchema] = useState<Schema | null>(session?.schema ?? null)
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null)
-  // links this session to an entry in the local saves list (utils/storage.ts);
-  // null until the first fileless Save prompts for a name, or until a saved
-  // project is opened from the main menu's list
-  const [currentSaveId, setCurrentSaveId] = useState<string | null>(null)
-  const [currentSaveName, setCurrentSaveName] = useState<string | null>(null)
+  const currentSave = useRef(session?.namedSave)
+  const hasExited = useRef(false)
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
@@ -505,10 +508,19 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   const [viewModeOpen, setViewModeOpen] = useState(false)
   const viewModeBtnRef = useRef<HTMLDivElement>(null)
   const [groupsOpen, setGroupsOpen] = useState(false)
-  const [activeLayoutId, setActiveLayoutId] = useState<string | null>(null)
+  const [activeLayoutId, setActiveLayoutId] = useState<string | null>(session?.activeLayoutId ?? null)
   // mirror of activeLayoutId for use inside save callbacks without dep churn
-  const activeLayoutIdRef = useRef<string | null>(null)
+  const activeLayoutIdRef = useRef(activeLayoutId)
   useEffect(() => { activeLayoutIdRef.current = activeLayoutId }, [activeLayoutId])
+  const persistSession = useCallback((schema: Schema) => {
+    if (hasExited.current) return
+    saveCurrentSession({
+      schema,
+      positions: masterPositionsRef.current,
+      activeLayoutId: activeLayoutIdRef.current,
+      namedSave: currentSave.current,
+    })
+  }, [])
   // per-view key used to scope the tag filter and hidden-table set below
   const viewKey = activeLayoutId ?? '__all__'
   const [layoutsOpen, setLayoutsOpen] = useState(false)
@@ -979,7 +991,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       const schemaOut = schema.layouts?.length
         ? { ...schema, layouts: schema.layouts.map(l => ({ ...l, positions: layoutPosRef.current[l.id] ?? l.positions })) }
         : schema
-      saveCurrentSession({ schema: schemaOut, positions: masterPositionsRef.current, activeLayoutId: activeLayoutIdRef.current })
+      persistSession(schemaOut)
       // re-frame the camera on the freshly arranged tables
       setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
     } catch (err) {
@@ -987,7 +999,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
     } finally {
       setLayouting(false)
     }
-  }, [schema, layouting, setNodes, baseTagFilter, viewMode, activeLayout])
+  }, [schema, layouting, setNodes, baseTagFilter, viewMode, activeLayout, persistSession])
 
   useEffect(() => {
     if (!pendingELK || layouting || nodes.length === 0) return
@@ -1324,11 +1336,11 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       (schemaToUse.layouts ?? []).map(l => [l.id, layoutPosRef.current[l.id] ?? { ...l.positions }])
     )
     setSchema(schemaToUse)
-    saveCurrentSession({ schema: schemaToUse, positions: masterPositionsRef.current, activeLayoutId: activeLayoutIdRef.current })
+    persistSession(schemaToUse)
     const { nodes: n, edges: e } = schemaToFlow(schemaToUse, handleEdit, masterPositionsRef.current, currentNodes)
     setNodes(n)
     setEdges(e)
-  }, [handleEdit, setNodes, setEdges])
+  }, [handleEdit, setNodes, setEdges, persistSession])
 
   const handleSchemaFromEditor = useCallback((newSchema: Schema, masterPositions?: Record<string, { x: number; y: number }>) => {
     // the editor's text is the new ground truth for any positions it touched —
@@ -1367,8 +1379,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // past the drag-debounced autosave below and revert to a stale snapshot
   const persistSessionNow = useCallback(() => {
     if (!schema) return
-    saveCurrentSession({ schema: serializeSchema(schema), positions: masterPositionsRef.current, activeLayoutId: activeLayoutIdRef.current })
-  }, [schema, serializeSchema])
+    persistSession(serializeSchema(schema))
+  }, [schema, serializeSchema, persistSession])
 
   const dragSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
@@ -1406,15 +1418,17 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   // whether it's a fileless project or one opened from disk. Name comes from
   // the file's own name when there's a handle (no prompt); otherwise it's
   // asked once, the first Save of the session, then reused on every later
-  // Save via currentSaveId.
+  // Save.
   const handleSave = useCallback(async () => {
     if (!schema) return
     const schemaOut = serializeSchema(schema)
-    let name = currentSaveName
+    const saved = currentSave.current
+    let name = saved?.name
 
     if (fileHandle) {
-      const isSql  = fileHandle.name.endsWith('.sql')
-      const isJson = fileHandle.name.endsWith('.json')
+      const extension = fileHandle.name.split('.').pop()?.toLowerCase()
+      const isSql  = extension === 'sql'
+      const isJson = extension === 'json'
       if (!isSql && !isJson) {
         exportJSON(schemaOut, masterPositionsRef.current)
         dialog.alert(
@@ -1438,7 +1452,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
         return
       }
       name = name ?? fileHandle.name.replace(/\.[^.]+$/, '')
-    } else if (!currentSaveId) {
+    } else if (!saved) {
       const promptedName = await dialog.prompt(
         lang === 'ru' ? 'Имя проекта' : 'Project name',
         lang === 'ru' ? 'Введите имя для сохранения в списке проектов' : 'Enter a name to save this project under',
@@ -1448,14 +1462,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
       name = promptedName.trim() || (lang === 'ru' ? 'Без названия' : 'Untitled')
     }
 
-    const entry = saveDB(name!, schemaOut, masterPositionsRef.current, currentSaveId ?? undefined)
-    setCurrentSaveId(entry.id)
-    setCurrentSaveName(entry.name)
+    const entry = saveDB(name!, schemaOut, masterPositionsRef.current, saved?.id)
+    currentSave.current = { id: entry.id, name: entry.name }
+    persistSession(schemaOut)
 
     setSaveFlash(true)
     setTimeout(() => setSaveFlash(false), 1500)
     dialog.alert(lang === 'ru' ? 'Сохранение' : 'Saved', lang === 'ru' ? 'Изменения успешно сохранены!' : 'All changes have been successfully saved.')
-  }, [schema, fileHandle, dialog, lang, serializeSchema, currentSaveId, currentSaveName])
+  }, [schema, fileHandle, dialog, lang, serializeSchema, persistSession])
 
   // asks for a filename before an export download; returns null if the user cancels
   const promptFilename = useCallback(async (ext: string, defaultName: string) => {
@@ -1477,11 +1491,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   }, [handleSave, clearHighlight])
 
   const handleExit = useCallback(() => {
-    clearCurrentSession(); setSchema(null)
-    setFileHandle(null); setBaseTagFilter(new Set()); setLayoutTagFilters({}); setHiddenTables({})
-    setActiveLayoutId(null); setEditorState(null)
-    setCurrentSaveId(null); setCurrentSaveName(null)
-  }, [])
+    hasExited.current = true
+    onProjectExit()
+  }, [onProjectExit])
 
   const handleEditorSave = useCallback((updated: Table, originalName: string | null) => {
     if (!schema) return
@@ -1549,12 +1561,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
   }, [schema, applySchema, t, highlightTable, dialog, lang])
 
   const handleOpen = useCallback((result: OpenResult) => {
-    setHighlightTable(null); setSelectedTables(new Set())
-    setBaseTagFilter(new Set()); setLayoutTagFilters({}); setHiddenTables({})
-    setActiveLayoutId(null)
     setFileHandle(result.fileHandle ?? null)
-    setCurrentSaveId(result.saveId ?? null)
-    setCurrentSaveName(result.saveName ?? null)
+    currentSave.current = result.saveId && result.saveName ? { id: result.saveId, name: result.saveName } : undefined
     // a JSON export's "All tables" entry is the master view's own positions,
     // not a real named layout — pull it back out before it's treated as one
     const allTablesLayout = result.schema.layouts?.find(l => l.name === 'All tables')
@@ -1580,7 +1588,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
           <div className={appStyles.topbarBadge}>{schema.tables.length} tables</div>
         </div>
 
-        {/* Canvas toolbar — groups, view mode, layouts, organize, JSON split */}
+        {/* Canvas toolbar — groups, view mode, layouts, organize, schema editor */}
         <div className={appStyles.canvasToolbar}>
 
           {/* Groups — multi-select checkboxes, OR-filtered, scoped + independent per view (see scopedTags/activeTagFilter) */}
@@ -1800,15 +1808,16 @@ function AppContent({ lang, setLang, theme, onThemeToggle }: {
             </button>
           </div>
 
-          {/* JSON split view */}
+          {/* Schema editor split view */}
           <div className={appStyles.toolPill}>
             <button
               onClick={() => { setSplitView(v => !v); setSchemaValid(true) }}
               className={`${appStyles.toolBtn} ${splitView ? appStyles.toolBtnActive : ''}`}
-              title="Toggle JSON editor"
+              title={lang === 'ru' ? 'Переключить редактор схемы (DSL)' : 'Toggle schema editor (DSL)'}
+              aria-pressed={splitView}
             >
               <span style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 600 }}>{'{}'}</span>
-              <span className={appStyles.toolBtnLabel}>JSON</span>
+              <span className={appStyles.toolBtnLabel}>{lang === 'ru' ? 'Схема' : 'Schema'}</span>
             </button>
           </div>
         </div>

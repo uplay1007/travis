@@ -65,6 +65,8 @@
 .topbarRight {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   align-items: center;
   gap: 8px;
   padding-right: 20px;
@@ -206,6 +208,8 @@
 
 .canvasToolbar {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   align-items: center;
   gap: 12px;
 }

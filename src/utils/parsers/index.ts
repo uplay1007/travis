@@ -7,8 +7,10 @@ import { parseDjango } from './django'
 import { parseSQLAlchemy } from './sqlalchemy'
 
 export type ParserType = 'json' | 'prisma' | 'sql' | 'typeorm' | 'django' | 'sqlalchemy'
+export const schemaFileExtensions = ['.sql', '.json', '.prisma', '.ts', '.py'] as const
 
 export function detectParser(filename: string, content?: string): ParserType {
+  filename = filename.toLowerCase()
   if (filename.endsWith('.prisma')) return 'prisma'
   if (filename.endsWith('.sql')) return 'sql'
   if (filename.endsWith('.json')) return 'json'
@@ -17,7 +19,7 @@ export function detectParser(filename: string, content?: string): ParserType {
     if (content && (content.includes('from sqlalchemy') || content.includes('import sqlalchemy') || content.includes('db.Model'))) return 'sqlalchemy'
     return 'django'
   }
-  return 'json'
+  throw new Error(`Supported formats: ${schemaFileExtensions.join(', ')}`)
 }
 
 export function parseSchema(text: string, type: ParserType): Schema {

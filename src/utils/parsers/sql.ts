@@ -1,13 +1,20 @@
 import type { Schema, Table, Column } from '../../types/schema'
 
-// split by commas not inside parentheses
-function splitTopLevel(s: string): string[] {
+// Split column lists and definitions without cutting through type parameters
+// or quoted values (including comma-separated enum labels).
+function splitTopLevel(s: string, separator: RegExp): string[] {
   const parts: string[] = []
   let depth = 0, start = 0
+  let quote = ''
   for (let i = 0; i < s.length; i++) {
-    if (s[i] === '(') depth++
-    else if (s[i] === ')') depth--
-    else if (s[i] === ',' && depth === 0) {
+    const char = s[i]
+    if (quote) {
+      if (char === quote) quote = ''
+      else if (char === '\\') i++
+    } else if (char === "'" || char === '"' || char === '`') quote = char
+    else if (char === '(') depth++
+    else if (char === ')') depth--
+    else if (depth === 0 && separator.test(char)) {
       parts.push(s.slice(start, i))
       start = i + 1
     }
@@ -15,6 +22,8 @@ function splitTopLevel(s: string): string[] {
   parts.push(s.slice(start))
   return parts
 }
+
+const COLUMN_CONSTRAINT = /^(?:not|null|default|primary|unique|references|check|constraint|collate|generated|auto_increment|comment|on|unsigned|zerofill)(?:$|\()/i
 
 export function parseSQL(text: string): Schema {
   const tables: Table[] = []
@@ -58,30 +67,34 @@ export function parseSQL(text: string): Schema {
       pkConstraint[1].split(',').forEach(c => pkInline.push(c.replace(/[`"']/g, '').trim()))
     }
 
-    for (const rawLine of splitTopLevel(body)) {
+    for (const rawLine of splitTopLevel(body, /,/)) {
       const line = rawLine.trim()
       if (!line) continue
       if (/^(PRIMARY|FOREIGN|UNIQUE\s+KEY|KEY|INDEX|CONSTRAINT)\s/i.test(line)) continue
 
-      const colMatch = line.match(/^[`"']?(\w+)[`"']?\s+(\S+)/)
+      const colMatch = line.match(/^[`"']?(\w+)[`"']?\s+(.+)$/s)
       if (!colMatch) continue
 
-      const colName = colMatch[1]
-      const colType = colMatch[2].replace(/[()0-9,]/g, '').toLowerCase()
+      const [, colName, definition] = colMatch
+      const tokens = splitTopLevel(definition, /\s/).filter(Boolean)
+      const constraintIndex = tokens.findIndex((token, index) => index > 0 && COLUMN_CONSTRAINT.test(token))
+      const typeTokens = constraintIndex < 0 ? tokens : tokens.slice(0, constraintIndex)
+      const constraints = constraintIndex < 0 ? '' : tokens.slice(constraintIndex).join(' ')
+      const colType = typeTokens.join(' ').replace(/^[\w ]+/, name => name.toLowerCase())
 
       // inline REFERENCES: col_name TYPE REFERENCES other_table(other_col)
-      const inlineRef = line.match(/REFERENCES\s+[`"']?(\w+)[`"']?\s*\(([^)]+)\)/i)
+      const inlineRef = constraints.match(/REFERENCES\s+[`"']?(\w+)[`"']?\s*\(([^)]+)\)/i)
       if (inlineRef) {
         fkMap[colName] = { table: inlineRef[1], column: inlineRef[2].replace(/[`"']/g, '').trim() }
       }
 
-      const isPK = line.toUpperCase().includes('PRIMARY KEY') || pkInline.includes(colName)
+      const isPK = /\bPRIMARY KEY\b/i.test(constraints) || pkInline.includes(colName)
       const col: Column = {
         name: colName,
         type: colType,
         primaryKey: isPK,
-        nullable: isPK ? false : !line.toUpperCase().includes('NOT NULL'),
-        unique: line.toUpperCase().includes('UNIQUE'),
+        nullable: !isPK && !/\bNOT NULL\b/i.test(constraints),
+        unique: /\bUNIQUE\b/i.test(constraints),
         foreignKey: fkMap[colName],
       }
       columns.push(col)
