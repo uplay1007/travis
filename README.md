@@ -1,70 +1,73 @@
-<h1 align="center">🗺️ TraVis - Trace and Visualize</h1>
+# TraVis
 
-<p align="center">
-  <b>Open a schema. Get a map.</b><br/>
-  Turn SQL, Prisma, Django, TypeORM or SQLAlchemy into an interactive diagram you can
-  drag, group, and reshape — right in the browser.
-</p>
+TraVis is a browser-based editor for relational database schemas. It supports designing a model from scratch and inspecting an existing schema before changing it or writing queries. The diagram shows each table's columns and keys, with lines representing foreign-key relationships.
 
-<p align="center">
-  <img src="https://img.shields.io/badge/React-18-61dafb?logo=react&logoColor=black" alt="React 18" />
-  <img src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Vite-6-646cff?logo=vite&logoColor=white" alt="Vite" />
-  <img src="https://img.shields.io/badge/scope-schema--only-10b981" alt="Schema-only" />
-</p>
+![TraVis canvas showing seven tables in an order fulfillment schema](screenshots/canvas.png)
 
-<!-- ▶ add a screenshot or GIF of the canvas here — it sells the whole thing -->
+## Run locally
 
----
+Use Node.js 22 or later with npm.
 
-A relational schema usually lives as text — DDL dumps, ORM models, migration files.
-Holding 30 tables and their foreign keys in your head from that is painful.
-**TraVis turns the text into a map you can actually read** — for designing a new
-database, onboarding onto a legacy one, or arguing about a model with your team.
-
-> It maps the **structure** — tables, columns, keys, relationships. Not the row data.
-
-## ✨ What it does
-
-- **⚡ Import anything** — SQL · Prisma · TypeORM · Django · SQLAlchemy · JSON. Format is auto-detected.
-- **🧭 Auto-layout** — ELK arranges even a 30-table schema into a readable map on first load, with per-column ports so foreign keys land on the exact row they join instead of bunching at one point. Or hit **Organize** anytime.
-- **🔦 Trace relationships** — click a table to spotlight everything it's linked to; hover an edge to light up the exact columns it joins.
-- **🎯 Focused views** — `Shift`-click to hand-pick tables, `⌥`-click to grab a table and its private satellites, then save them as named **layouts** — each with its own positions *and* detail level.
-- **✏️ Edit live** — use the visual table editor or open **Schema** to edit the DSL alongside the canvas. Invalid drafts are highlighted and the canvas keeps the last valid schema.
-- **🏷️ Table roles** — tag a table's architectural role (reference, master, transactional, link, dimension, fact) for a quick read on how a schema is shaped.
-- **💾 Local-first** — no login, no server. Your schema lives in the browser and on disk; nothing leaves your machine.
-- **↔️ Round-trip export** — write back to SQL DDL or a clean, structured JSON.
-- **📐 draw.io export** — export the whole schema at once, one switchable page per layout (plus "All tables"), as native draw.io table shapes ready to drop into docs or wikis.
-
-## 🚀 Quick start
-
-```bash
+```sh
 git clone https://github.com/uplay1007/travis.git
 cd travis
-npm install
+npm ci
 npm run dev
 ```
 
-Choose **Create a schema** to start on a blank canvas, or **Open a schema** to choose a file or drop it onto the card.
+Open the local address printed by Vite. Run `npm run build` to type-check the project and generate the static site in `dist/`.
 
-## 🔌 Formats
+## Start a project
 
-| Format | Import | Export |
-|--------|:------:|:------:|
-| SQL (PostgreSQL / MySQL) | ✅ | ✅ |
-| JSON (structured) | ✅ | ✅ |
-| Prisma schema | ✅ | — |
-| TypeORM entities | ✅ | — |
-| Django models | ✅ | — |
-| SQLAlchemy models | ✅ | — |
-| draw.io diagram | — | ✅ |
+Choose **Create a schema** to start with an empty canvas, then use **New Table** to define the first table. Choose **Open a schema** to browse for a file or drop it onto the card. TraVis arranges the imported tables automatically when the file has no saved positions.
 
-## 🛠 Built with
+![TraVis start screen with options to create a schema or open an existing file](screenshots/start-screen.png)
 
-[React 18](https://react.dev/) · [React Flow](https://reactflow.dev/) (canvas) ·
-[ELK.js](https://github.com/kieler/elkjs) (layout) · [CodeMirror](https://codemirror.net/) (DSL editor) ·
-[Vite](https://vitejs.dev/)
+## Explore and edit a schema
 
----
+Click a table to highlight its direct foreign-key neighbours. Hover over a relationship to see the two columns that participate in it. Use **Organize** to run the automatic layout again after changes, or drag cards into place manually.
 
-<p align="center"><sub>Structure, not data — no row contents, live connections, or migrations.</sub></p>
+Choose **Full** to see every column, **Compact** to show primary and foreign keys, or **Collapsed** to work at the table level. **Groups** and **Types** filter the canvas by tag and table role. A named layout can show a subset of the schema and keep its own positions and detail level. For example, a fulfillment layout can include orders, shipments and warehouses while the full model stays available under **All tables**.
+
+Use the table form to edit columns, keys and relationships. The **Schema** button opens a text editor alongside the canvas. It uses a schema DSL with separate blocks for tables, relationships and layout positions. Valid edits update the diagram. The editor marks errors while the canvas continues to show the last valid model.
+
+![TraVis split view with the schema language editor and an order fulfillment layout](screenshots/schema-editor.png)
+
+<details>
+<summary>Example schema in the DSL</summary>
+
+Paste this into **Schema** in a new project to create two tables and a foreign key from `orders.customer_id` to `customers.id`.
+
+```text
+Table customers {
+  id bigint pk
+  email varchar(255) unique
+}
+
+Table orders {
+  id bigint pk
+  customer_id bigint
+  total numeric(12,2)
+}
+
+Relations {
+  orders.customer_id > customers.id
+}
+```
+
+</details>
+
+## File formats
+
+- **SQL (`.sql`)** imports common PostgreSQL and MySQL table definitions. It reads foreign keys declared in `CREATE TABLE` or added with `ALTER TABLE`. SQL export generates PostgreSQL-oriented DDL from the schema model.
+- **TraVis JSON (`.json`)** supports import and export. It carries table definitions, relationships, groups and saved layouts.
+- **Prisma (`.prisma`), TypeORM (`.ts`), Django and SQLAlchemy (`.py`)** support import from model files.
+- **draw.io (`.drawio`)** exports an editable diagram. The file contains an overview page and one page per named layout.
+
+## Local storage
+
+TraVis restores the current session from browser storage. **Save** adds or updates a named entry under **Recent projects** in the same browser. Export the project as TraVis JSON to keep a file copy or move it to another browser.
+
+## Implementation
+
+The application is built with React, TypeScript and Vite. React Flow renders the canvas, ELK calculates automatic table positions, and CodeMirror provides the DSL editor. Parsing, editing and export run in the browser.
