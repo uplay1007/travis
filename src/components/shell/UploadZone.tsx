@@ -5,6 +5,7 @@ import { getSaves, deleteDB, type SavedDB } from '../../utils/storage'
 import { T, type Lang } from '../../i18n'
 import type { Schema } from '../../types/schema'
 import { Logo } from '../ui/Logo'
+import { RepositoryLink } from '../ui/RepositoryLink'
 import { ThemeSwitch } from '../ui/ThemeSwitch'
 import styles from './UploadZone.module.css'
 
@@ -96,7 +97,10 @@ export function UploadZone({ lang, theme, onThemeToggle, onOpen }: Props) {
           <Logo size={22} />
           <span>TraVis</span>
         </div>
-        <ThemeSwitch theme={theme} onToggle={onThemeToggle} />
+        <div className={styles.navActions}>
+          <ThemeSwitch theme={theme} onToggle={onThemeToggle} />
+          <RepositoryLink />
+        </div>
       </header>
 
       <main className={styles.body}>

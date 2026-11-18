@@ -25,6 +25,12 @@
   letter-spacing: -0.045em;
 }
 
+.navActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .body {
   position: relative;
   isolation: isolate;

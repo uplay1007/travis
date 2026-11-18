@@ -49,6 +49,7 @@ import { T, type Lang } from './i18n'
 import { TABLE_TYPES } from './utils/tableTypes'
 import { DialogProvider, useDialog } from './contexts/DialogContext'
 import { Logo } from './components/ui/Logo'
+import { RepositoryLink } from './components/ui/RepositoryLink'
 import { ThemeSwitch } from './components/ui/ThemeSwitch'
 import appStyles from './App.module.css'
 
@@ -1586,6 +1587,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           <Logo size={20} />
           <span className={appStyles.topbarLogo}>TraVis</span>
           <div className={appStyles.topbarBadge}>{schema.tables.length} tables</div>
+          <RepositoryLink />
         </div>
 
         {/* Canvas toolbar — groups, view mode, layouts, organize, schema editor */}
