@@ -71,3 +71,9 @@ TraVis restores the current session from browser storage. **Save** adds or updat
 ## Implementation
 
 The application is built with React, TypeScript and Vite. React Flow renders the canvas, ELK calculates automatic table positions, and CodeMirror provides the DSL editor. Parsing, editing and export run in the browser.
+
+## Author and credits
+
+TraVis was created and is maintained by [Ilya Levashov](https://github.com/uplay1007). [drawDB](https://github.com/drawdb-io/drawdb) was an inspiration for the schema editor.
+
+The theme switch is adapted from work by Madflows on Uiverse. See the [third-party notices](THIRD_PARTY_NOTICES.md).
