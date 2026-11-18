@@ -1,5 +1,7 @@
 # TraVis
 
+[Open TraVis in your browser](https://travis-db.vercel.app/)
+
 TraVis is a browser-based editor for relational database schemas. It supports designing a model from scratch and inspecting an existing schema before changing it or writing queries. The diagram shows each table's columns and keys, with lines representing foreign-key relationships.
 
 ![TraVis canvas showing seven tables in an order fulfillment schema](screenshots/canvas.png)
