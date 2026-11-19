@@ -245,6 +245,17 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
     // is both PK and FK) or a 1:1 extension table (child.id PK referencing
     // parent.id), both legitimate, common patterns.
     if (!tgtCol.primaryKey && !tgtCol.unique) { diagnostics.push({ line, message: `"${tT}.${tC}" must be a primary key or unique to be referenced` }); continue }
+    const existing = srcCol.foreignKey
+    if (existing) {
+      const source = `${sT}.${sC}`
+      const target = `${tT}.${tC}`
+      const previousTarget = `${existing.table}.${existing.column}`
+      const message = target === previousTarget
+        ? `Duplicate relation "${source} > ${target}"`
+        : `"${source}" already references "${previousTarget}"`
+      diagnostics.push({ line, message })
+      continue
+    }
     srcCol.foreignKey = { table: tT, column: tC }
   }
 
