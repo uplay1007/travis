@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { Table, Column, Schema, TableType } from '../../types/schema'
-import { tableColor, tagColor, PALETTE } from '../../utils/colors'
+import { tagColor, PALETTE } from '../../utils/colors'
 import { T, type Lang } from '../../i18n'
 import { useDialog } from '../../contexts/DialogContext'
 import { IDENT } from '../../utils/schemaDSL'
@@ -18,26 +18,29 @@ const COMMON_TYPES = [
   'enum', 'array',
 ]
 
-function emptyCol(): Column {
-  return { name: '', type: 'varchar', nullable: true }
+const FLAG_LABELS = {
+  en: { PK: 'Primary key', NN: 'Not null', UQ: 'Unique', AI: 'Auto increment' },
+  ru: { PK: 'Первичный ключ', NN: 'Не null', UQ: 'Уникальность', AI: 'Автоинкремент' },
 }
 
-function Checkbox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+function ColumnFlag({ code, label, checked, onChange }: {
+  code: string
+  label: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+}) {
   return (
-    <button
-      onClick={() => onChange(!checked)}
-      className={styles.checkboxBtn}
-      style={{
-        '--cb-bg': checked ? '#6366f1' : 'transparent',
-        '--cb-border': checked ? '#6366f1' : 'rgba(255,255,255,0.15)',
-      } as React.CSSProperties}
-    >
-      {checked && (
-        <svg width="11" height="9" viewBox="0 0 11 9" fill="none">
-          <path d="M1 4L4 7.5L10 1" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      )}
-    </button>
+    <td role="cell" className={styles.flagCell}>
+      <label className={styles.flagControl} title={label}>
+        <span className={styles.mobileLabel} aria-hidden="true">{code}</span>
+        <input
+          type="checkbox"
+          aria-label={label}
+          checked={checked}
+          onChange={event => onChange(event.target.checked)}
+        />
+      </label>
+    </td>
   )
 }
 
@@ -51,7 +54,9 @@ interface Props {
 
 export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
   const t = T[lang]
+  const flagLabels = FLAG_LABELS[lang]
   const dialog = useDialog()
+  const id = useId()
   const isNew = table === null
   const [name, setName] = useState(table?.name ?? '')
   const [columns, setColumns] = useState<Column[]>(
@@ -64,11 +69,21 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
   const [tagInput, setTagInput] = useState('')
   const [isDirty, setIsDirty] = useState(false)
   const [fkPickerRow, setFkPickerRow] = useState<number | null>(null)
+  const nameInput = useRef<HTMLInputElement>(null)
+  const lastColumnInput = useRef<HTMLInputElement>(null)
+  const focusNewColumn = useRef(false)
+
+  useEffect(() => {
+    if (focusNewColumn.current) {
+      lastColumnInput.current?.focus()
+      focusNewColumn.current = false
+    }
+  }, [columns.length])
 
   const handleClose = async () => {
-    if (isDirty) {
+    if (isDirty || tagInput.trim()) {
       const ok = await dialog.confirm(
-        lang === 'ru' ? 'Несохраненные изменения' : 'Unsaved changes',
+        lang === 'ru' ? 'Несохранённые изменения' : 'Unsaved changes',
         lang === 'ru' ? 'Выйти без сохранения изменений?' : 'Discard unsaved changes?'
       )
       if (!ok) return
@@ -76,267 +91,291 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
     onClose()
   }
 
-  const defaultAccent = tagColor(tags.length > 0 ? tags : undefined)
+  const defaultAccent = tagColor(tags)
   const accent = color ?? defaultAccent
+  const pendingTag = tagInput.trim().toLowerCase().replace(/\s+/g, '_')
+  const canAddTag = pendingTag.length > 0 && !tags.includes(pendingTag)
 
-  const updateCol = (i: number, patch: Partial<Column>) => {
-    setColumns(cols => cols.map((c, idx) => idx === i ? { ...c, ...patch } : c))
+  const addTag = () => {
+    if (canAddTag) {
+      setTags(current => [...current, pendingTag])
+      setIsDirty(true)
+    }
+    setTagInput('')
+  }
+
+  const addColumn = () => {
+    focusNewColumn.current = true
+    setColumns(current => [...current, { name: '', type: 'varchar', nullable: true }])
     setIsDirty(true)
   }
-  const deleteCol = (i: number) => {
-    setColumns(cols => cols.filter((_, idx) => idx !== i))
+
+  const updateCol = (index: number, patch: Partial<Column>) => {
+    setColumns(current => current.map((column, i) => i === index ? { ...column, ...patch } : column))
     setIsDirty(true)
   }
-  const moveUp = (i: number) => {
-    if (i === 0) return
-    setColumns(cols => { const n = [...cols]; [n[i-1], n[i]] = [n[i], n[i-1]]; return n })
+
+  const deleteCol = (index: number) => {
+    setColumns(current => current.filter((_, i) => i !== index))
     setIsDirty(true)
   }
-  const moveDown = (i: number) => {
-    setColumns(cols => {
-      if (i >= cols.length - 1) return cols
-      const n = [...cols]; [n[i], n[i+1]] = [n[i+1], n[i]]; return n
+
+  const moveCol = (from: number, to: number) => {
+    setColumns(current => {
+      const reordered = [...current]
+      reordered[from] = current[to]
+      reordered[to] = current[from]
+      return reordered
     })
     setIsDirty(true)
   }
 
-  const save = () => {
-    const trimmedName = name.trim()
-    const finalTags = [...tags]
-    const pendingTag = tagInput.trim().toLowerCase().replace(/\s+/g, '_')
-    if (pendingTag && !finalTags.includes(pendingTag)) finalTags.push(pendingTag)
-
-    if (!trimmedName) { setNameError(t.tableName + ' required'); return }
-    if (!IDENT.test(trimmedName)) {
-      setNameError(lang === 'ru' ? 'Только латиница, цифры и _' : 'Latin letters, digits and _ only')
-      return
-    }
-    const nameConflict = schema.tables.find(tb => tb.name === trimmedName && tb.name !== table?.name)
-    if (nameConflict) { setNameError('Already exists'); return }
-
-    const saved: Table = { name: trimmedName, columns, tags: finalTags }
-    if (tableType) saved.type = tableType
-    if (color) saved.color = color
-    onSave(saved, isNew ? null : table!.name)
+  const showNameError = (message: string) => {
+    setNameError(message)
+    nameInput.current?.focus()
   }
 
-  const otherTables = schema.tables.filter(tb => tb.name !== (table?.name ?? ''))
+  const save = () => {
+    const trimmedName = name.trim()
+    if (!trimmedName) {
+      showNameError(lang === 'ru' ? 'Укажи имя таблицы' : 'Enter a table name')
+      return
+    }
+    if (!IDENT.test(trimmedName)) {
+      showNameError(lang === 'ru' ? 'Только латиница, цифры и _' : 'Latin letters, digits and _ only')
+      return
+    }
+    if (schema.tables.some(entry => entry.name === trimmedName && entry.name !== table?.name)) {
+      showNameError(lang === 'ru' ? 'Таблица с таким именем уже есть' : 'A table with this name already exists')
+      return
+    }
+
+    const saved: Table = { name: trimmedName, columns, tags: canAddTag ? [...tags, pendingTag] : tags }
+    if (tableType) saved.type = tableType
+    if (color) saved.color = color
+    onSave(saved, table?.name ?? null)
+  }
+
+  const otherTables = schema.tables.filter(entry => entry.name !== table?.name)
 
   return (
-    <div className={styles.overlay} onClick={handleClose}>
-      <div
-        className={styles.modal}
-        style={{ '--accent': accent } as React.CSSProperties}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className={styles.header}>
-          <div className={styles.headerLeft}>
-            <span className={styles.headerLabel}>
-              {isNew ? t.createTable : t.editTable}
-            </span>
-            <input
-              className={styles.nameInput}
-              value={name}
-              onChange={e => { setName(e.target.value); setNameError(''); setIsDirty(true) }}
-              placeholder="table_name"
-              autoFocus={isNew}
-            />
-            {nameError && <span className={styles.nameError}>{nameError}</span>}
-          </div>
-          <button onClick={handleClose} className={styles.closeBtn}>×</button>
-        </div>
+    <>
+      <div className={styles.overlay} onClick={handleClose}>
+        <div
+          role="dialog"
+          aria-labelledby={`${id}-title`}
+          className={styles.modal}
+          style={{ '--table-accent': accent } as React.CSSProperties}
+          onClick={event => event.stopPropagation()}
+        >
+          <header className={styles.header}>
+            <div className={styles.headerTitle}>
+              <span className={styles.tableAccent} aria-hidden="true" />
+              <h2 id={`${id}-title`}>{isNew ? t.createTable : t.editTable}</h2>
+            </div>
+            <button type="button" onClick={handleClose} className={styles.closeBtn} aria-label={t.closeEditor}>×</button>
+          </header>
 
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
-            <colgroup>
-              <col className={styles.col22} />
-              <col className={styles.col16} />
-              <col className={styles.col7} />
-              <col className={styles.col7} />
-              <col className={styles.col7} />
-              <col className={styles.col7} />
-              <col className={styles.col22} />
-              <col className={styles.col12} />
-            </colgroup>
-            <thead className={styles.thead}>
-              <tr>
-                {[t.colName, t.type, 'PK', 'NN', 'UQ', 'AI', t.foreignKey, ''].map((h, i) => (
-                  <th
-                    key={i}
-                    className={`${styles.th} ${i >= 2 && i <= 5 ? styles.thCenter : ''}`}
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {columns.map((col, i) => (
-                <tr key={i} className={styles.row}>
-                  <td className={styles.td}>
-                    <input
-                      className={styles.cellInput}
-                      value={col.name}
-                      onChange={e => updateCol(i, { name: e.target.value })}
-                      placeholder="column_name"
-                    />
-                  </td>
-                  <td className={styles.td}>
-                    <select
-                      className={styles.cellSelect}
-                      value={COMMON_TYPES.includes(col.type) ? col.type : '__custom__'}
-                      onChange={e => { if (e.target.value !== '__custom__') updateCol(i, { type: e.target.value }) }}
-                    >
-                      {COMMON_TYPES.map(tp => <option key={tp} value={tp}>{tp}</option>)}
-                      {!COMMON_TYPES.includes(col.type) && <option value="__custom__">{col.type}</option>}
-                    </select>
-                  </td>
-                  <td className={styles.tdCenter}>
-                    <div className={styles.checkboxCenter}>
-                      <Checkbox checked={!!col.primaryKey} onChange={v => updateCol(i, { primaryKey: v, nullable: v ? false : col.nullable })} />
-                    </div>
-                  </td>
-                  <td className={styles.tdCenter}>
-                    <div className={styles.checkboxCenter}>
-                      <Checkbox checked={!col.nullable} onChange={v => updateCol(i, { nullable: !v })} />
-                    </div>
-                  </td>
-                  <td className={styles.tdCenter}>
-                    <div className={styles.checkboxCenter}>
-                      <Checkbox checked={!!col.unique} onChange={v => updateCol(i, { unique: v })} />
-                    </div>
-                  </td>
-                  <td className={styles.tdCenter}>
-                    <div className={styles.checkboxCenter}>
-                      <Checkbox checked={col.type === 'serial' || col.type === 'bigserial'} onChange={v => updateCol(i, { type: v ? 'serial' : 'integer' })} />
-                    </div>
-                  </td>
-                  <td className={styles.td}>
-                    <button onClick={() => setFkPickerRow(i)} className={styles.fkBtn}>
-                      {col.foreignKey ? (
-                        <>
-                          <span className={styles.fkTable} style={{ color: tableColor(col.foreignKey.table) }}>
-                            {col.foreignKey.table}
-                          </span>
-                          <span className={styles.fkDot}>.</span>
-                          <span className={styles.fkCol}>{col.foreignKey.column}</span>
-                        </>
-                      ) : (
-                        <span className={styles.fkEmpty}>Link →</span>
-                      )}
-                    </button>
-                    {fkPickerRow === i && (
-                      <FKPicker
-                        tables={otherTables}
-                        value={col.foreignKey}
-                        onChange={fk => { updateCol(i, { foreignKey: fk }); setFkPickerRow(null) }}
-                        onClose={() => setFkPickerRow(null)}
-                      />
-                    )}
-                  </td>
-                  <td className={styles.td}>
-                    <div className={styles.rowActions}>
-                      <button onClick={() => moveUp(i)} className={styles.rowActionBtn}>↑</button>
-                      <button onClick={() => moveDown(i)} className={styles.rowActionBtn}>↓</button>
-                      <button onClick={() => deleteCol(i)} className={styles.rowDeleteBtn}>✕</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className={styles.addColSection}>
-          <button
-            onClick={() => { setColumns(c => [...c, emptyCol()]); setIsDirty(true) }}
-            className={styles.addColBtn}
-          >
-            {t.addColumn}
-          </button>
-        </div>
-
-        <div className={styles.tagsSection}>
-          <div className={styles.tagsRow}>
-            <span className={styles.tagsLabel}>{lang === 'ru' ? 'Тип:' : 'Type:'}</span>
-            <select
-              className={styles.typeSelect}
-              value={tableType}
-              onChange={e => { setTableType(e.target.value as TableType | ''); setIsDirty(true) }}
-            >
-              <option value="">{lang === 'ru' ? '— не задан —' : '— none —'}</option>
-              {TABLE_TYPES.map(tt => (
-                <option key={tt.value} value={tt.value}>{lang === 'ru' ? tt.ru : tt.en}</option>
-              ))}
-            </select>
-          </div>
-          {/* Accent color — the swatches override the tag/name-derived default
-              (see utils/colors.ts tableAccent); "Auto" clears back to it. */}
-          <div className={styles.tagsRow}>
-            <span className={styles.tagsLabel}>{lang === 'ru' ? 'Цвет:' : 'Color:'}</span>
-            <button
-              type="button"
-              onClick={() => { setColor(undefined); setIsDirty(true) }}
-              className={`${styles.swatch} ${styles.swatchAuto} ${color === undefined ? styles.swatchActive : ''}`}
-              style={{ '--sw': defaultAccent } as React.CSSProperties}
-              title={lang === 'ru' ? 'Авто (по тегу)' : 'Auto (from tag)'}
-            >A</button>
-            {PALETTE.map(c => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => { setColor(c); setIsDirty(true) }}
-                className={`${styles.swatch} ${color === c ? styles.swatchActive : ''}`}
-                style={{ '--sw': c } as React.CSSProperties}
-                title={c}
+          <div className={styles.body}>
+            <div className={styles.nameField}>
+              <label htmlFor={`${id}-name`}>{t.tableName}</label>
+              <input
+                id={`${id}-name`}
+                ref={nameInput}
+                className={styles.nameInput}
+                value={name}
+                onChange={event => { setName(event.target.value); setNameError(''); setIsDirty(true) }}
+                placeholder="table_name"
+                autoFocus={isNew}
+                aria-invalid={nameError ? true : undefined}
+                aria-describedby={nameError ? `${id}-name-error` : undefined}
               />
-            ))}
-          </div>
-          <div className={styles.tagsRow}>
-            <span className={styles.tagsLabel}>Tags:</span>
-            {tags.map(tag => (
-              <span key={tag} className={styles.tagChip}>
-                {tag}
-                <button
-                  onClick={() => { setTags(ts => ts.filter(t => t !== tag)); setIsDirty(true) }}
-                  className={styles.tagRemoveBtn}
-                >×</button>
-              </span>
-            ))}
-            <input
-              value={tagInput}
-              onChange={e => setTagInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key !== 'Enter') return
-                e.preventDefault()
-                e.stopPropagation()
-                const v = tagInput.trim().toLowerCase().replace(/\s+/g, '_')
-                if (v && !tags.includes(v)) { setTags(ts => [...ts, v]); setIsDirty(true) }
-                setTagInput('')
-              }}
-              placeholder="add tag…"
-              className={styles.tagInput}
-            />
-            <button
-              type="button"
-              onClick={e => {
-                e.stopPropagation()
-                const v = tagInput.trim().toLowerCase().replace(/\s+/g, '_')
-                if (v && !tags.includes(v)) { setTags(ts => [...ts, v]); setIsDirty(true) }
-                setTagInput('')
-              }}
-              className={styles.tagAddBtn}
-            >+</button>
-          </div>
-        </div>
+              {nameError && <p className={styles.nameError} id={`${id}-name-error`} role="alert">{nameError}</p>}
+            </div>
 
-        <div className={styles.legend}>{t.legend}</div>
+            <section aria-labelledby={`${id}-columns`}>
+              <div className={styles.sectionBar}>
+                <h3 id={`${id}-columns`}>{t.columnsHeading}</h3>
+                <button type="button" className={styles.addColumn} onClick={addColumn}>{t.addColumn}</button>
+              </div>
 
-        <div className={styles.footer}>
-          <button onClick={handleClose} className={styles.cancelBtn}>{t.cancel}</button>
-          <button onClick={save} className={styles.saveBtn}>{isNew ? t.create : t.save}</button>
+              {columns.length === 0 ? (
+                <p className={styles.emptyColumns}>{t.noColumns}</p>
+              ) : (
+                <div className={styles.tableWrap}>
+                  <table role="table" className={styles.table}>
+                    <colgroup>
+                      <col />
+                      <col className={styles.typeColumn} />
+                      <col span={4} className={styles.flagColumn} />
+                      <col />
+                      <col className={styles.actionsColumn} />
+                    </colgroup>
+                    <thead role="rowgroup" className={styles.thead}>
+                      <tr role="row">
+                        <th role="columnheader" scope="col">{t.colName}</th>
+                        <th role="columnheader" scope="col">{t.type}</th>
+                        {Object.entries(flagLabels).map(([code, label]) => (
+                          <th role="columnheader" scope="col" key={code} title={label} className={styles.flagHeading}>{code}</th>
+                        ))}
+                        <th role="columnheader" scope="col">{t.foreignKey}</th>
+                        <th role="columnheader" scope="col" className={styles.actionsHeading}>{t.columnActions}</th>
+                      </tr>
+                    </thead>
+                    <tbody role="rowgroup">
+                      {columns.map((column, index) => {
+                        const foreignKey = column.foreignKey
+                        const target = foreignKey && `${foreignKey.table}.${foreignKey.column}`
+                        return (
+                          <tr role="row" key={index} className={styles.row}>
+                            <td role="cell" className={styles.columnField}>
+                              <span className={styles.mobileLabel} aria-hidden="true">{t.colName}</span>
+                              <input
+                                ref={index === columns.length - 1 ? lastColumnInput : undefined}
+                                className={styles.columnName}
+                                value={column.name}
+                                onChange={event => updateCol(index, { name: event.target.value })}
+                                aria-label={`${t.colName} ${index + 1}`}
+                                placeholder="column_name"
+                              />
+                            </td>
+                            <td role="cell" className={styles.columnField}>
+                              <span className={styles.mobileLabel} aria-hidden="true">{t.type}</span>
+                              <select
+                                aria-label={`${t.type} ${index + 1}`}
+                                value={COMMON_TYPES.includes(column.type) ? column.type : '__custom__'}
+                                onChange={event => updateCol(index, { type: event.target.value })}
+                              >
+                                {!COMMON_TYPES.includes(column.type) && <option value="__custom__">{column.type}</option>}
+                                {COMMON_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+                              </select>
+                            </td>
+                            <ColumnFlag code="PK" label={flagLabels.PK} checked={!!column.primaryKey} onChange={checked => updateCol(index, { primaryKey: checked, nullable: checked ? false : column.nullable })} />
+                            <ColumnFlag code="NN" label={flagLabels.NN} checked={!column.nullable} onChange={checked => updateCol(index, { nullable: !checked })} />
+                            <ColumnFlag code="UQ" label={flagLabels.UQ} checked={!!column.unique} onChange={checked => updateCol(index, { unique: checked })} />
+                            <ColumnFlag code="AI" label={flagLabels.AI} checked={column.type === 'serial' || column.type === 'bigserial'} onChange={checked => updateCol(index, { type: checked ? 'serial' : 'integer' })} />
+                            <td role="cell" className={styles.foreignKeyCell}>
+                              <span className={styles.mobileLabel} aria-hidden="true">{t.foreignKey}</span>
+                              <button
+                                type="button"
+                                aria-label={target ? `${t.foreignKey}: ${target}` : t.foreignKey}
+                                title={target}
+                                onClick={() => setFkPickerRow(index)}
+                                className={styles.fkBtn}
+                                data-linked={!!target}
+                              >
+                                <span>{target ?? (lang === 'ru' ? 'Связать' : 'Link')}</span>
+                                <span aria-hidden="true">→</span>
+                              </button>
+                            </td>
+                            <td role="cell" className={styles.actionsCell}>
+                              <div className={styles.rowActions}>
+                                <button type="button" onClick={() => moveCol(index, index - 1)} disabled={index === 0} aria-label={t.moveColumnUp} title={t.moveColumnUp}>↑</button>
+                                <button type="button" onClick={() => moveCol(index, index + 1)} disabled={index === columns.length - 1} aria-label={t.moveColumnDown} title={t.moveColumnDown}>↓</button>
+                                <button type="button" onClick={() => deleteCol(index)} className={styles.deleteColumn} aria-label={t.removeColumn} title={t.removeColumn}>×</button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <p className={styles.legend}>{t.legend}</p>
+            </section>
+
+            <section className={styles.settings} aria-labelledby={`${id}-settings`}>
+              <h3 id={`${id}-settings`}>{t.tableSettings}</h3>
+              <div className={styles.settingsGrid}>
+                <div className={styles.settingField}>
+                  <label htmlFor={`${id}-role`}>{t.tableRole}</label>
+                  <select
+                    id={`${id}-role`}
+                    value={tableType}
+                    onChange={event => { setTableType(event.target.value as TableType | ''); setIsDirty(true) }}
+                  >
+                    <option value="">{lang === 'ru' ? 'Без роли' : 'None'}</option>
+                    {TABLE_TYPES.map(role => (
+                      <option key={role.value} value={role.value}>{role[lang]}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className={styles.settingField}>
+                  <span id={`${id}-color`}>{t.tableColor}</span>
+                  <div className={styles.swatches} role="group" aria-labelledby={`${id}-color`}>
+                    <button
+                      type="button"
+                      onClick={() => { setColor(undefined); setIsDirty(true) }}
+                      className={`${styles.swatch} ${styles.swatchAuto}`}
+                      aria-pressed={color === undefined}
+                      style={{ '--swatch': defaultAccent } as React.CSSProperties}
+                      aria-label={lang === 'ru' ? 'Цвет по тегу' : 'Automatic color from tag'}
+                    >A</button>
+                    {PALETTE.map(swatch => (
+                      <button
+                        key={swatch}
+                        type="button"
+                        onClick={() => { setColor(swatch); setIsDirty(true) }}
+                        className={styles.swatch}
+                        aria-pressed={color === swatch}
+                        style={{ '--swatch': swatch } as React.CSSProperties}
+                        title={swatch}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div className={`${styles.settingField} ${styles.tagField}`}>
+                  <label htmlFor={`${id}-tags`}>{t.tableTags}</label>
+                  <div className={styles.tags}>
+                    {tags.map(tag => (
+                      <span key={tag} className={styles.tag}>
+                        <span>{tag}</span>
+                        <button
+                          type="button"
+                          onClick={() => { setTags(current => current.filter(value => value !== tag)); setIsDirty(true) }}
+                          aria-label={t.removeTag(tag)}
+                        >×</button>
+                      </span>
+                    ))}
+                    <div className={styles.tagEntry}>
+                      <input
+                        id={`${id}-tags`}
+                        value={tagInput}
+                        onChange={event => setTagInput(event.target.value)}
+                        onKeyDown={event => {
+                          if (event.key !== 'Enter') return
+                          event.preventDefault()
+                          event.stopPropagation()
+                          addTag()
+                        }}
+                        placeholder={lang === 'ru' ? 'Добавить тег…' : 'Add a tag…'}
+                      />
+                      <button type="button" className={styles.tagAddBtn} onClick={addTag} disabled={!canAddTag} aria-label={t.addTag}>+</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <footer className={styles.footer}>
+            <button type="button" onClick={handleClose} className={styles.cancelBtn}>{t.cancel}</button>
+            <button type="button" onClick={save} className={styles.saveBtn}>{isNew ? t.create : t.save}</button>
+          </footer>
         </div>
       </div>
-    </div>
+      {fkPickerRow !== null && columns[fkPickerRow] && (
+        <FKPicker
+          tables={otherTables}
+          value={columns[fkPickerRow].foreignKey}
+          onChange={foreignKey => updateCol(fkPickerRow, { foreignKey })}
+          onClose={() => setFkPickerRow(null)}
+        />
+      )}
+    </>
   )
 }
