@@ -173,6 +173,17 @@ export function SchemaEditor({ schema, masterPositions, onSchemaChange, onValidi
     setSearchQuery('')
   }, [])
 
+  const scrollToError = (lineNumber: number) => {
+    const view = editorViewRef.current
+    if (!view) return
+    const line = view.state.doc.line(Math.min(lineNumber, view.state.doc.lines))
+    view.dispatch({
+      selection: { anchor: line.from },
+      effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
+    })
+    view.focus()
+  }
+
   const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Escape') { setSearchOpen(false); setSearchQuery('') }
     if (e.key === 'ArrowDown') { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, searchResults.length - 1)) }
@@ -202,15 +213,11 @@ export function SchemaEditor({ schema, masterPositions, onSchemaChange, onValidi
           <span>Find table</span>
         </button>
 
-        {/* Error mini-log — scrolls horizontally for long messages */}
-        <div className={`${styles.log} ${diagnostics.length ? styles.logError : styles.logOk}`}>
+        <span role="status" className={`${styles.status} ${diagnostics.length ? styles.statusError : styles.statusOk}`}>
           {diagnostics.length === 0
-            ? <span className={styles.logOkText}>✓ valid</span>
-            : diagnostics.map((d, i) => (
-                <span key={i} className={styles.logItem}>⚠ line {d.line}: {d.message}</span>
-              ))
-          }
-        </div>
+            ? '✓ valid'
+            : `${diagnostics.length} ${diagnostics.length === 1 ? 'error' : 'errors'}`}
+        </span>
       </div>
 
       {searchOpen && (
@@ -257,6 +264,23 @@ export function SchemaEditor({ schema, masterPositions, onSchemaChange, onValidi
             <div className={styles.noResults}>No table found</div>
           )}
         </div>
+      )}
+
+      {diagnostics.length > 0 && (
+        <ul className={styles.diagnostics} aria-label="Schema errors">
+          {diagnostics.map((diagnostic, index) => (
+            <li key={index}>
+              <button
+                type="button"
+                className={styles.diagnosticButton}
+                onClick={() => scrollToError(diagnostic.line)}
+              >
+                <span className={styles.diagnosticLine}>Line {diagnostic.line}</span>
+                <span className={styles.diagnosticMessage}>{diagnostic.message}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
 
       <div className={styles.editorWrap}>
