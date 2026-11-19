@@ -9,6 +9,7 @@ export const SIDEBAR_W = 300
 interface Props {
   tables: Table[]
   lang: Lang
+  readOnly: boolean
   onLangToggle: () => void
   onNew: () => void
   onEdit: (table: Table) => void
@@ -16,7 +17,7 @@ interface Props {
   onExit: () => void
 }
 
-export function Sidebar({ tables, lang, onLangToggle, onNew, onEdit, onDelete, onExit }: Props) {
+export function Sidebar({ tables, lang, readOnly, onLangToggle, onNew, onEdit, onDelete, onExit }: Props) {
   const t = T[lang]
   const [search, setSearch] = useState('')
   const filtered = search.trim()
@@ -26,7 +27,7 @@ export function Sidebar({ tables, lang, onLangToggle, onNew, onEdit, onDelete, o
   return (
     <div className={styles.sidebar}>
       <div className={styles.newBtnWrap}>
-        <button onClick={onNew} className={styles.newBtn}>
+        <button onClick={onNew} disabled={readOnly} className={styles.newBtn}>
           {t.newTable}
         </button>
       </div>
@@ -58,7 +59,7 @@ export function Sidebar({ tables, lang, onLangToggle, onNew, onEdit, onDelete, o
               />
 
               <div className={styles.nameCol}>
-                <span className={styles.tableName} onClick={() => onEdit(table)}>
+                <span className={styles.tableName} onClick={readOnly ? undefined : () => onEdit(table)}>
                   {table.name}
                 </span>
                 {table.tags && table.tags.length > 0 && (
@@ -73,8 +74,8 @@ export function Sidebar({ tables, lang, onLangToggle, onNew, onEdit, onDelete, o
               <span className={styles.colCount}>{table.columns.length}</span>
 
               <div className={styles.actions}>
-                <button onClick={() => onEdit(table)} className={styles.editBtn} title="Edit">✏️</button>
-                <button onClick={() => onDelete(table.name)} className={styles.deleteBtn} title="Delete">🗑️</button>
+                <button onClick={() => onEdit(table)} disabled={readOnly} className={styles.editBtn} title="Edit">✏️</button>
+                <button onClick={() => onDelete(table.name)} disabled={readOnly} className={styles.deleteBtn} title="Delete">🗑️</button>
               </div>
             </div>
           )

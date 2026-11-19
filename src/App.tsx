@@ -39,7 +39,7 @@ import { computeELKLayout } from './services/layoutService'
 import { resolveOverlaps, type Rect } from './utils/separateNodes'
 import { TableEditor } from './components/editor/TableEditor'
 import { Sidebar } from './components/shell/Sidebar'
-import { SchemaEditor } from './components/editor/SchemaEditor'
+import { SchemaEditor, type DSLStatus } from './components/editor/SchemaEditor'
 import { UploadZone, type OpenResult } from './components/shell/UploadZone'
 import { writeToHandle } from './utils/fileAccess'
 import { exportSQL } from './utils/parsers/sql'
@@ -561,7 +561,17 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [applyViewMode, activeLayoutId])
 
   const [splitView, setSplitView] = useState(false)
-  const [schemaValid, setSchemaValid] = useState(true)
+  const dslDraftRef = useRef<string | null>(null)
+  const [dslStatus, setDslStatus] = useState<DSLStatus>('valid')
+  // Update immediately for canvas events; async layout work also checks identity
+  // before applying a result started before the current DSL edit.
+  const dslStatusRef = useRef({ status: dslStatus })
+  const canvasReadOnly = dslStatus !== 'valid'
+  const handleDSLStatus = useCallback((status: DSLStatus) => {
+    if (dslStatusRef.current.status === status) return
+    dslStatusRef.current = { status }
+    setDslStatus(status)
+  }, [])
   const [editorWidth, setEditorWidth] = useState(380)
   const editorWidthRef = useRef(380)
   useEffect(() => { editorWidthRef.current = editorWidth }, [editorWidth])
@@ -860,6 +870,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   const prevBaseTagKeyRef = useRef<string>(baseTagKey)
   useEffect(() => {
     if (!schema || activeLayoutId) return
+    const validation = dslStatusRef.current
+    if (validation.status !== 'valid') return
     // only re-frame when the tag selection actually changed — not on content/viewMode edits
     const tagChanged = prevBaseTagKeyRef.current !== baseTagKey
     prevBaseTagKeyRef.current = baseTagKey
@@ -887,6 +899,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     }
 
     computeELKLayout(schema, heights, visibleNames).then(({ positions }) => {
+      if (validation !== dslStatusRef.current) return
       setNodes(prev => prev.map(n =>
         positions[n.id] ? { ...n, position: positions[n.id] } : n
       ))
@@ -906,6 +919,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   // TableNode's handleHeaderClick) so they don't get flattened into whatever
   // 1-or-2-node set React Flow happens to have selected.
   const handleTableClick = useCallback((name: string, mods: { cmd: boolean; alt: boolean; shift: boolean }) => {
+    if (dslStatusRef.current.status !== 'valid') return
     if (mods.cmd) {
       // Toggle exactly the clicked table's membership in the current group —
       // never its own neighbours. The first cmd-click seeds the group from
@@ -969,7 +983,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }), [edgeHover])
 
   const handleLayout = useCallback(async () => {
-    if (!schema || layouting) return
+    const validation = dslStatusRef.current
+    if (!schema || layouting || validation.status !== 'valid') return
     setLayouting(true)
     try {
       const heights: Record<string, number> = {}
@@ -980,6 +995,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       }
       const filter = activeLayout ? new Set(activeLayout.tables) : undefined
       const { positions } = await computeELKLayout(schema, heights, filter)
+      if (validation !== dslStatusRef.current) return
       if (activeLayout) {
         layoutPosRef.current[activeLayout.id] = { ...(layoutPosRef.current[activeLayout.id] ?? {}), ...positions }
       } else if (baseTagFilter.size === 0) {
@@ -1003,7 +1019,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [schema, layouting, setNodes, baseTagFilter, viewMode, activeLayout, persistSession])
 
   useEffect(() => {
-    if (!pendingELK || layouting || nodes.length === 0) return
+    if (!pendingELK || layouting || canvasReadOnly || nodes.length === 0) return
     const visibleNodes = baseTagFilter.size > 0 && schema
       ? nodes.filter(n => schema.tables.find(t => t.name === n.id)?.tags?.some(tag => baseTagFilter.has(tag)))
       : nodes
@@ -1012,7 +1028,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     setPendingELK(false)
     handleLayout()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sizesVersion stands in for sizesRef
-  }, [pendingELK, nodes, layouting, handleLayout, baseTagFilter, schema, sizesVersion])
+  }, [pendingELK, nodes, layouting, handleLayout, baseTagFilter, schema, sizesVersion, canvasReadOnly])
 
   // persist a dragged position to the active view: layout ref, else master
   // (tag-filter view is ephemeral — no persistence)
@@ -1028,6 +1044,11 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [activeLayoutId, baseTagFilter])
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    if (dslStatusRef.current.status !== 'valid') {
+      const measurements = changes.filter(change => change.type === 'dimensions')
+      if (measurements.length) onNodesChange(measurements)
+      return
+    }
     onNodesChange(changes)
     changes.forEach(c => {
       if (c.type === 'position' && c.position) persistPos(c.id, c.position)
@@ -1044,6 +1065,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   // merely had lit-up neighbours dragged them all along with it — a plain
   // click was supposed to move only the one table you grabbed.
   const handleNodeDragStart = useCallback((_e: MouseEvent | TouchEvent, node: Node) => {
+    if (dslStatusRef.current.status !== 'valid') return
     if (!highlightCtxValue.groupMode || !highlightCtxValue.highlighted.has(node.id)) return
     groupDragOrigins.current = Object.fromEntries(
       nodes
@@ -1053,6 +1075,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [highlightCtxValue.groupMode, highlightCtxValue.highlighted, nodes, resolvedPosition])
 
   const handleNodeDrag = useCallback((_e: MouseEvent | TouchEvent, node: Node) => {
+    if (dslStatusRef.current.status !== 'valid') return
     const isGroupDrag = highlightCtxValue.groupMode && highlightCtxValue.highlighted.has(node.id)
 
     persistPos(node.id, { x: node.position.x, y: node.position.y })
@@ -1076,6 +1099,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   // Push apart tables that ended up overlapping, from their current on-screen
   // positions and measured sizes. Nodes in `pinned` stay put.
   const separateOverlaps = useCallback((pinned: Set<string>) => {
+    if (dslStatusRef.current.status !== 'valid') return
     const current = nodesRef.current
     if (current.length === 0) return
 
@@ -1172,6 +1196,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   // layout among themselves, offset to sit beside the existing cluster, then
   // nudged clear of any overlap.
   const addTablesToLayout = useCallback(async (names: string[], targetLayoutId?: string) => {
+    const validation = dslStatusRef.current
+    if (validation.status !== 'valid') return
     const target = targetLayoutId ? schema?.layouts?.find(l => l.id === targetLayoutId) : activeLayout
     if (!target || !schema) return
     const newNames = names.filter(n => !target.tables.includes(n))
@@ -1183,6 +1209,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     })
 
     const { positions: newPositions } = await computeELKLayout(schema, heights, new Set(newNames))
+    if (validation !== dslStatusRef.current) return
 
     const existingPos = layoutPosRef.current[target.id] ?? {}
     let maxX = 0, minY = 0, any = false
@@ -1289,7 +1316,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [schema, activeLayout, highlightCtxValue.highlighted, lang, showToast])
 
   const t = T[lang]
-  const handleEdit = useCallback((table: Table) => setEditorState(table.name), [])
+  const handleEdit = useCallback((table: Table) => {
+    if (dslStatusRef.current.status === 'valid') setEditorState(table.name)
+  }, [])
 
   // refresh layouts' stored positions from the live ref before persisting
   const serializeSchema = useCallback((s: Schema): Schema => {
@@ -1497,7 +1526,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [onProjectExit])
 
   const handleEditorSave = useCallback((updated: Table, originalName: string | null) => {
-    if (!schema) return
+    if (!schema || dslStatusRef.current.status !== 'valid') return
     let newTables: Table[]
     if (originalName === null) {
       newTables = [...schema.tables, updated]
@@ -1546,9 +1575,10 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [schema, applySchema])
 
   const handleDelete = useCallback(async (tableName: string) => {
-    if (!schema) return
+    const validation = dslStatusRef.current
+    if (!schema || validation.status !== 'valid') return
     const ok = await dialog.confirm(lang === 'ru' ? 'Удаление таблицы' : 'Delete table', t.deleteConfirm(tableName))
-    if (!ok) return
+    if (!ok || validation !== dslStatusRef.current) return
     if (highlightTable === tableName) setHighlightTable(null)
     setSelectedTables(prev => {
       if (!prev.has(tableName)) return prev
@@ -1597,6 +1627,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           <div className={appStyles.groupsPill} ref={groupsBtnRef}>
             <button
               onClick={() => setGroupsOpen(!groupsOpen)}
+              disabled={canvasReadOnly}
               className={`${appStyles.groupsBtn} ${activeTagFilter.size > 0 ? appStyles.groupsBtnFiltered : ''}`}
             >
               <span className={appStyles.toolBtnIcon}>◎</span>
@@ -1609,7 +1640,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               </span>
               <span className={appStyles.groupsChevron}>▼</span>
             </button>
-            {groupsOpen && (
+            {groupsOpen && !canvasReadOnly && (
               <div className={appStyles.groupsDropdown}>
                 <button
                   onClick={clearActiveTagFilter}
@@ -1646,6 +1677,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           <div className={appStyles.groupsPill} ref={typesBtnRef}>
             <button
               onClick={() => setTypesOpen(o => !o)}
+              disabled={canvasReadOnly}
               className={`${appStyles.groupsBtn} ${activeTypeFilter.size > 0 ? appStyles.groupsBtnFiltered : ''}`}
             >
               <span className={appStyles.toolBtnIcon}>▤</span>
@@ -1656,7 +1688,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               </span>
               <span className={appStyles.groupsChevron}>▼</span>
             </button>
-            {typesOpen && (
+            {typesOpen && !canvasReadOnly && (
               <div className={appStyles.groupsDropdown}>
                 <button
                   onClick={clearActiveTypeFilter}
@@ -1696,12 +1728,13 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           <div className={appStyles.groupsPill} ref={viewModeBtnRef}>
             <button
               onClick={() => setViewModeOpen(o => !o)}
+              disabled={canvasReadOnly}
               className={appStyles.groupsBtn}
             >
               <span className={appStyles.toolBtnLabel}>{VIEW_MODES.find(m => m.value === viewMode)?.[lang]}</span>
               <span className={appStyles.groupsChevron}>▼</span>
             </button>
-            {viewModeOpen && (
+            {viewModeOpen && !canvasReadOnly && (
               <div className={`${appStyles.groupsDropdown} ${appStyles.groupsDropdownNarrow}`}>
                 {VIEW_MODES.map(m => (
                   <button
@@ -1721,6 +1754,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           <div className={appStyles.groupsPill} ref={layoutsBtnRef}>
             <button
               onClick={() => setLayoutsOpen(o => !o)}
+              disabled={canvasReadOnly}
               className={`${appStyles.groupsBtn} ${activeLayout ? appStyles.groupsBtnFiltered : ''}`}
             >
               <span className={appStyles.toolBtnIcon}>▦</span>
@@ -1729,7 +1763,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               </span>
               <span className={appStyles.groupsChevron}>▼</span>
             </button>
-            {layoutsOpen && (
+            {layoutsOpen && !canvasReadOnly && (
               <div className={appStyles.groupsDropdown}>
                 <button
                   onClick={() => selectLayout(null)}
@@ -1786,6 +1820,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
             <div className={appStyles.toolPill}>
               <button
                 onClick={() => toggleLayoutLock(activeLayout.id)}
+                disabled={canvasReadOnly}
                 className={`${appStyles.toolBtn} ${activeLayout.locked ? appStyles.toolBtnActive : ''}`}
                 title={activeLayout.locked
                   ? (lang === 'ru' ? 'Разблокировать лэйаут (разрешить перетаскивание)' : 'Unlock layout (allow dragging)')
@@ -1801,7 +1836,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           <div className={appStyles.toolPill}>
             <button
               onClick={handleLayout}
-              disabled={layouting}
+              disabled={layouting || canvasReadOnly}
               className={`${appStyles.toolBtn} ${layouting ? appStyles.toolBtnDisabled : ''}`}
               title="Auto-arrange tables (ELK)"
             >
@@ -1813,7 +1848,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           {/* Schema editor split view */}
           <div className={appStyles.toolPill}>
             <button
-              onClick={() => { setSplitView(v => !v); setSchemaValid(true) }}
+              onClick={() => setSplitView(v => !v)}
               className={`${appStyles.toolBtn} ${splitView ? appStyles.toolBtnActive : ''}`}
               title={lang === 'ru' ? 'Переключить редактор схемы (DSL)' : 'Toggle schema editor (DSL)'}
               aria-pressed={splitView}
@@ -1878,7 +1913,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
             {splitView ? (
               <>
                 <div className={appStyles.splitEditorPane} style={{ width: editorWidth }}>
-                  <SchemaEditor schema={schema} masterPositions={masterPositionsRef.current} onSchemaChange={handleSchemaFromEditor} onValidityChange={setSchemaValid} width={editorWidth} />
+                  <SchemaEditor
+                    schema={schema}
+                    masterPositions={masterPositionsRef.current}
+                    draftRef={dslDraftRef}
+                    onSchemaChange={handleSchemaFromEditor}
+                    onStatusChange={handleDSLStatus}
+                    width={editorWidth}
+                  />
                 </div>
                 <div className={appStyles.resizeHandle} onMouseDown={handleResizeStart} />
               </>
@@ -1886,6 +1928,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               <Sidebar
                 tables={schema.tables}
                 lang={lang}
+                readOnly={canvasReadOnly}
                 onLangToggle={() => setLang(l => l === 'en' ? 'ru' : 'en')}
                 onNew={() => setEditorState('new')}
                 onEdit={handleEdit}
@@ -1897,7 +1940,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               {/* Top-left selection/layout actions row: Create-layout or Add-table,
                   plus Hide/Show/Delete-from-layout when applicable. All the same
                   row so they don't stack into separate absolute-positioned FABs. */}
-              <div className={appStyles.topLeftFabRow}>
+              {!canvasReadOnly && <div className={appStyles.topLeftFabRow}>
                 {/* Create-layout button — appears when a table (or group) is selected */}
                 {highlightCtxValue.highlighted.size > 0 && !activeLayout && (
                   <button className={`${appStyles.createLayoutFab} ${appStyles.fabInWrap}`} onClick={createLayoutFromSelection}>
@@ -1945,10 +1988,10 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
                     <span className={appStyles.createLayoutFabCount}>{highlightCtxValue.highlighted.size}</span>
                   </button>
                 )}
-              </div>
+              </div>}
 
               {/* Add-to-layout — quick-add the selection to any OTHER existing layout */}
-              {highlightCtxValue.highlighted.size > 0 && (schema.layouts ?? []).some(l => l.id !== activeLayoutId) && (
+              {!canvasReadOnly && highlightCtxValue.highlighted.size > 0 && (schema.layouts ?? []).some(l => l.id !== activeLayoutId) && (
                 <div className={appStyles.addToLayoutWrap}>
                   <button
                     className={`${appStyles.createLayoutFab} ${appStyles.fabInWrap}`}
@@ -1983,29 +2026,32 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               {toast && <div className={appStyles.toast}>{toast}</div>}
 
               <ThemeCtx.Provider value={theme}>
-              <ViewModeCtx.Provider value={{ mode: viewMode, bulkExpand, bulkKey }}>
+              <ViewModeCtx.Provider value={{ mode: viewMode, bulkExpand, bulkKey, readOnly: canvasReadOnly }}>
                 <HighlightCtx.Provider value={highlightCtxValue}>
                  <EdgeHoverCtx.Provider value={edgeHoverCtxValue}>
                     <ReactFlow
                       nodes={displayNodes}
                       edges={displayEdges}
                       onNodesChange={handleNodesChange}
-                      onEdgesChange={onEdgesChange}
+                      onEdgesChange={canvasReadOnly ? undefined : onEdgesChange}
                       onNodeDragStart={handleNodeDragStart}
                       onNodeDrag={handleNodeDrag}
                       onNodeDragStop={handleNodeDragStop}
-                      onSelectionChange={handleSelectionChange}
-                      onNodeClick={handleNodeClick}
-                      onPaneClick={clearHighlight}
+                      onSelectionChange={canvasReadOnly ? undefined : handleSelectionChange}
+                      onNodeClick={canvasReadOnly ? undefined : handleNodeClick}
+                      onPaneClick={canvasReadOnly ? undefined : clearHighlight}
                       nodeTypes={NODE_TYPES}
                       edgeTypes={EDGE_TYPES}
                       fitView
                       fitViewOptions={{ padding: 0.2 }}
                       minZoom={0.05}
-                      nodesDraggable={!activeLayout?.locked}
+                      nodesDraggable={!canvasReadOnly && !activeLayout?.locked}
+                      nodesConnectable={!canvasReadOnly}
+                      elementsSelectable={!canvasReadOnly}
+                      deleteKeyCode={canvasReadOnly ? null : undefined}
                       selectionMode={SelectionMode.Partial}
                       panOnDrag={[2]}
-                      selectionOnDrag
+                      selectionOnDrag={!canvasReadOnly}
                       selectNodesOnDrag={false}
                       multiSelectionKeyCode="Shift"
                       panOnScroll={true}
@@ -2029,19 +2075,17 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               </ViewModeCtx.Provider>
               </ThemeCtx.Provider>
 
-              {/* Non-blocking notice while the schema editor has errors — the
-                  invalid draft never reaches `schema` (see SchemaEditor's
-                  commit()), so the canvas can't go out of sync with it; no
-                  need to block interaction with the canvas underneath. */}
-              {splitView && !schemaValid && (
-                <div className={appStyles.freezeBanner}>
-                  ⚠ {lang === 'ru' ? 'Исправьте ошибки схемы в редакторе' : 'Fix schema errors in the editor'}
+              {canvasReadOnly && (
+                <div className={appStyles.freezeBanner} role="status">
+                  {dslStatus === 'checking'
+                    ? (lang === 'ru' ? 'Проверка DSL…' : 'Checking DSL…')
+                    : (lang === 'ru' ? 'Холст только для просмотра. Исправьте ошибки в DSL.' : 'Canvas is read-only. Fix the errors in DSL.')}
                 </div>
               )}
 
               {/* Dragging is disabled (nodesDraggable above) while the active
                   layout is locked — tables can still be selected/edited. */}
-              {activeLayout?.locked && (
+              {!canvasReadOnly && activeLayout?.locked && (
                 <div className={appStyles.lockedBanner}>
                   🔒 {lang === 'ru' ? 'Канвас заблокирован' : 'Canvas locked'}
                 </div>

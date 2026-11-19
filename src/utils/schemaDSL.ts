@@ -151,6 +151,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
 
   const lines = text.split('\n')
   let mode: 'none' | 'table' | 'relations' | 'layout' = 'none'
+  let blockStart = 0
   let cur: Table | null = null
   let curCols: Set<string> | null = null
   let curLayoutLines: { line: number; text: string }[] | null = null
@@ -161,6 +162,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
     if (!line || line.startsWith('//') || line.startsWith('--')) continue
 
     if (mode === 'none') {
+      blockStart = lineNo
       if (/^Relations\b/i.test(line)) { mode = 'relations'; continue }
       const lm = /^Layout\s+"([^"]*)"\s*\{?\s*$/i.exec(line)
       if (lm) {
@@ -225,6 +227,10 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
     // mode === 'relations'
     if (line === '}') { mode = 'none'; continue }
     relLines.push({ line: lineNo, text: line })
+  }
+
+  if (mode !== 'none') {
+    diagnostics.push({ line: blockStart, message: `Unclosed ${mode} block — expected "}"` })
   }
 
   // validate relations against the parsed tables

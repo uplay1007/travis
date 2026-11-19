@@ -214,6 +214,11 @@
   gap: 12px;
 }
 
+.canvasToolbar button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .toolPill {
   display: flex;
   background: rgba(var(--bg-card-rgb), 0.9);

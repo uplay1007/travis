@@ -62,7 +62,7 @@ export const TableNode = memo(({ data }: NodeProps) => {
   const [expanded, setExpanded] = useState(true)
   const hl = useContext(HighlightCtx)
   const edgeHover = useContext(EdgeHoverCtx)
-  const { mode: viewMode, bulkKey, bulkExpand } = useContext(ViewModeCtx)
+  const { mode: viewMode, bulkKey, bulkExpand, readOnly } = useContext(ViewModeCtx)
   const accent = tableAccent(table)
   const lastAppliedKey = useRef(0)
   const nodeId = useNodeId()
@@ -186,6 +186,7 @@ export const TableNode = memo(({ data }: NodeProps) => {
           )}
           <button
             className={styles.editBtn}
+            disabled={readOnly}
             onClick={e => { e.stopPropagation(); onEdit(table) }}
             title="Edit table"
           >
