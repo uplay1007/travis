@@ -156,10 +156,32 @@
   border-color: rgba(var(--overlay-rgb), 0.2);
 }
 
-.modal select {
-  padding-right: 6px;
+.selectField {
+  position: relative;
+  display: block;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.modal .selectField select {
+  display: block;
+  appearance: none;
+  padding-inline-end: 32px;
   cursor: pointer;
   text-overflow: ellipsis;
+}
+
+.selectField::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  inset-inline-end: 14px;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-65%) rotate(45deg);
+  pointer-events: none;
 }
 
 .modal .nameInput,

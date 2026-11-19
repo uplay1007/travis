@@ -241,14 +241,16 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
                             </td>
                             <td role="cell" className={styles.columnField}>
                               <span className={styles.mobileLabel} aria-hidden="true">{t.type}</span>
-                              <select
-                                aria-label={`${t.type} ${index + 1}`}
-                                value={COMMON_TYPES.includes(column.type) ? column.type : '__custom__'}
-                                onChange={event => updateCol(index, { type: event.target.value })}
-                              >
-                                {!COMMON_TYPES.includes(column.type) && <option value="__custom__">{column.type}</option>}
-                                {COMMON_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
-                              </select>
+                              <div className={styles.selectField}>
+                                <select
+                                  aria-label={`${t.type} ${index + 1}`}
+                                  value={COMMON_TYPES.includes(column.type) ? column.type : '__custom__'}
+                                  onChange={event => updateCol(index, { type: event.target.value })}
+                                >
+                                  {!COMMON_TYPES.includes(column.type) && <option value="__custom__">{column.type}</option>}
+                                  {COMMON_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+                                </select>
+                              </div>
                             </td>
                             <ColumnFlag code="PK" label={flagLabels.PK} checked={!!column.primaryKey} onChange={checked => updateCol(index, { primaryKey: checked, nullable: checked ? false : column.nullable })} />
                             <ColumnFlag code="NN" label={flagLabels.NN} checked={!column.nullable} onChange={checked => updateCol(index, { nullable: !checked })} />
@@ -291,16 +293,18 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
               <div className={styles.settingsGrid}>
                 <div className={styles.settingField}>
                   <label htmlFor={`${id}-role`}>{t.tableRole}</label>
-                  <select
-                    id={`${id}-role`}
-                    value={tableType}
-                    onChange={event => { setTableType(event.target.value as TableType | ''); setIsDirty(true) }}
-                  >
-                    <option value="">{lang === 'ru' ? 'Без роли' : 'None'}</option>
-                    {TABLE_TYPES.map(role => (
-                      <option key={role.value} value={role.value}>{role[lang]}</option>
-                    ))}
-                  </select>
+                  <div className={styles.selectField}>
+                    <select
+                      id={`${id}-role`}
+                      value={tableType}
+                      onChange={event => { setTableType(event.target.value as TableType | ''); setIsDirty(true) }}
+                    >
+                      <option value="">{lang === 'ru' ? 'Без роли' : 'None'}</option>
+                      {TABLE_TYPES.map(role => (
+                        <option key={role.value} value={role.value}>{role[lang]}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div className={styles.settingField}>
