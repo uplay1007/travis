@@ -41,7 +41,7 @@ import { TableEditor } from './components/editor/TableEditor'
 import { Sidebar } from './components/shell/Sidebar'
 import { SchemaEditor } from './components/editor/SchemaEditor'
 import { UploadZone, type OpenResult } from './components/shell/UploadZone'
-import { writeToHandle } from './utils/fileAccess'
+import { downloadTextFile, pickSaveFile, writeToHandle } from './utils/fileAccess'
 import { exportSQL } from './utils/parsers/sql'
 import { schemaToStructured } from './utils/structuredJSON'
 import { exportDrawio, type DrawioPage } from './utils/drawioExport'
@@ -399,27 +399,23 @@ function schemaToFlow(
 
 type EditorState = null | 'new' | string
 
+const EXPORT_FORMATS = {
+  json: { label: 'JSON', mimeType: 'application/json' },
+  sql: { label: 'SQL', mimeType: 'text/plain' },
+  drawio: { label: 'draw.io', mimeType: 'application/xml' },
+}
+
+type ExportFormat = keyof typeof EXPORT_FORMATS
+
 function withExt(name: string, ext: string): string {
   const trimmed = name.trim()
   if (!trimmed) return `schema.${ext}`
   return trimmed.toLowerCase().endsWith(`.${ext}`) ? trimmed : `${trimmed}.${ext}`
 }
 
-function exportJSON(schema: Schema, masterPositions: Record<string, { x: number; y: number }> = {}, filename = 'schema.json') {
-  const blob = new Blob([JSON.stringify(schemaToStructured(schema, masterPositions), null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
-}
-
-function downloadSQL(schema: Schema, filename = 'schema.sql') {
-  const sql = exportSQL(schema)
-  const blob = new Blob([sql], { type: 'text/plain' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
+function downloadJSON(schema: Schema, masterPositions: Record<string, { x: number; y: number }>) {
+  const content = JSON.stringify(schemaToStructured(schema, masterPositions), null, 2)
+  downloadTextFile(content, EXPORT_FORMATS.json.mimeType, 'schema.json')
 }
 
 export default function App() {
@@ -457,6 +453,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
 
   const [schema, setSchema] = useState<Schema | null>(session?.schema ?? null)
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null)
+  const [exporting, setExporting] = useState(false)
   const currentSave = useRef(session?.namedSave)
   const hasExited = useRef(false)
 
@@ -1300,14 +1297,12 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   // Export the whole schema to a draw.io file — one page per TraVis layout
   // plus an "All tables" page, switchable as tabs in draw.io (like sheets in
   // a spreadsheet), each keeping that view's own table set and positions.
-  const handleExportDrawio = useCallback((filename = 'schema.drawio') => {
-    if (!schema) return
-    const schemaOut = serializeSchema(schema)
+  const getDrawioContent = (schemaOut: Schema, positions: DrawioPage['positions']) => {
     const pages: DrawioPage[] = [
       {
         name: lang === 'ru' ? 'Все таблицы' : 'All tables',
         tables: schemaOut.tables,
-        positions: masterPositionsRef.current,
+        positions,
       },
       ...(schemaOut.layouts ?? []).map(l => ({
         name: l.name,
@@ -1315,14 +1310,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
         positions: l.positions,
       })),
     ]
-    const blob = new Blob([exportDrawio(pages)], { type: 'application/xml' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [schema, serializeSchema, lang])
+    return exportDrawio(pages)
+  }
 
   const applySchema = useCallback((
     s: Schema,
@@ -1431,7 +1420,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       const isSql  = extension === 'sql'
       const isJson = extension === 'json'
       if (!isSql && !isJson) {
-        exportJSON(schemaOut, masterPositionsRef.current)
+        downloadJSON(schemaOut, masterPositionsRef.current)
         dialog.alert(
           lang === 'ru' ? 'Формат файла' : 'File format',
           lang === 'ru'
@@ -1445,7 +1434,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
         await writeToHandle(fileHandle, content)
       } catch (e) {
         console.warn('File write failed, falling back to download', e)
-        exportJSON(schemaOut, masterPositionsRef.current)
+        downloadJSON(schemaOut, masterPositionsRef.current)
         dialog.alert(
           lang === 'ru' ? 'Ошибка записи' : 'Write failed',
           lang === 'ru' ? 'Не удалось сохранить в файл. Схема скачана как копия.' : 'Could not write to file. Schema downloaded as a copy instead.'
@@ -1472,15 +1461,56 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     dialog.alert(lang === 'ru' ? 'Сохранение' : 'Saved', lang === 'ru' ? 'Изменения успешно сохранены!' : 'All changes have been successfully saved.')
   }, [schema, fileHandle, dialog, lang, serializeSchema, persistSession])
 
-  // asks for a filename before an export download; returns null if the user cancels
-  const promptFilename = useCallback(async (ext: string, defaultName: string) => {
-    const name = await dialog.prompt(
-      lang === 'ru' ? 'Имя файла' : 'Filename',
-      lang === 'ru' ? 'Введите имя файла для экспорта' : 'Enter a filename for the export',
-      defaultName
-    )
-    return name === null ? null : withExt(name, ext)
-  }, [dialog, lang])
+  const handleExport = async (format: ExportFormat) => {
+    if (!schema || exporting) return
+    const { label, mimeType } = EXPORT_FORMATS[format]
+    const title = lang === 'ru' ? `Экспорт ${label}` : `Export ${label}`
+    setExporting(true)
+
+    try {
+      const schemaOut = serializeSchema(schema)
+      const positions = masterPositionsRef.current
+      // The picker needs the click's user activation, so open it before generating the file.
+      const handle = await pickSaveFile(format, mimeType, label)
+      if (handle === null) return
+
+      let filename = `schema.${format}`
+      if (!handle) {
+        const name = await dialog.prompt(
+          lang === 'ru' ? 'Имя файла' : 'Filename',
+          lang === 'ru' ? 'Введите имя файла для скачивания' : 'Enter a filename for the download',
+          'schema',
+        )
+        if (name === null) return
+        filename = withExt(name, format)
+      }
+
+      let content: string
+      switch (format) {
+        case 'json':
+          content = JSON.stringify(schemaToStructured(schemaOut, positions), null, 2)
+          break
+        case 'sql':
+          content = exportSQL(schemaOut)
+          break
+        case 'drawio':
+          content = getDrawioContent(schemaOut, positions)
+          break
+      }
+
+      if (handle) {
+        await writeToHandle(handle, content)
+        await dialog.alert(title, lang === 'ru' ? 'Файл сохранён.' : 'File saved.')
+      } else {
+        downloadTextFile(content, mimeType, filename)
+      }
+    } catch (error) {
+      console.error('Could not export schema', error)
+      await dialog.alert(title, lang === 'ru' ? 'Не удалось сохранить файл.' : 'Could not save the file.')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1826,34 +1856,22 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
 
         <div className={appStyles.topbarRight}>
           <button
-            onClick={async () => {
-              const filename = await promptFilename('json', 'schema')
-              if (!filename) return
-              exportJSON(serializeSchema(schema), masterPositionsRef.current, filename)
-              dialog.alert(lang === 'ru' ? 'Экспорт JSON' : 'JSON Export', lang === 'ru' ? 'Файл схемы успешно скачан.' : 'The schema file has been successfully downloaded.')
-            }}
+            onClick={() => void handleExport('json')}
+            disabled={exporting}
             className={appStyles.exportBtn}
           >
             ↓ JSON
           </button>
           <button
-            onClick={async () => {
-              const filename = await promptFilename('sql', 'schema')
-              if (!filename) return
-              downloadSQL(schema, filename)
-              dialog.alert(lang === 'ru' ? 'Экспорт SQL' : 'SQL Export', lang === 'ru' ? 'SQL DDL файл успешно скачан.' : 'The SQL DDL file has been successfully downloaded.')
-            }}
+            onClick={() => void handleExport('sql')}
+            disabled={exporting}
             className={appStyles.exportBtn}
           >
             ↓ SQL
           </button>
           <button
-            onClick={async () => {
-              const filename = await promptFilename('drawio', 'schema')
-              if (!filename) return
-              handleExportDrawio(filename)
-              dialog.alert(lang === 'ru' ? 'Экспорт draw.io' : 'draw.io Export', lang === 'ru' ? 'Файл .drawio со всеми лэйаутами (вкладками) успешно скачан.' : 'The .drawio file with all layouts as tabs has been downloaded.')
-            }}
+            onClick={() => void handleExport('drawio')}
+            disabled={exporting}
             className={appStyles.exportBtn}
           >
             ↓ drawio
