@@ -27,9 +27,47 @@ const KNOWN_TYPES = new Set([
   'enum', 'set', 'array', 'inet', 'cidr', 'macaddr', 'point', 'geometry', 'geography', 'hstore',
 ])
 
-function isKnownType(type: string): boolean {
-  const baseType = type.replace(/\([^)]*\)|\[\d*\]/g, '').trim().replace(/\s+/g, ' ').toLowerCase()
-  return KNOWN_TYPES.has(baseType)
+const CHARACTER_LENGTH_TYPES = new Set([
+  'varchar', 'char', 'character', 'nvarchar', 'nchar',
+  'character varying', 'char varying', 'national character', 'national character varying',
+])
+const NUMERIC_PRECISION_TYPES = new Set(['numeric', 'decimal', 'number'])
+const MAX_CHARACTER_LENGTH = 10 * 1024 * 1024
+const MAX_NUMERIC_PRECISION = 1000
+const MAX_NUMERIC_SCALE = 1000
+
+function columnTypeError(type: string): string | undefined {
+  const baseType = type.replace(/\([^)]*\)|\[\s*\d*\s*\]/g, '').trim().replace(/\s+/g, ' ').toLowerCase()
+  if (!KNOWN_TYPES.has(baseType)) return `Unknown type "${type}"`
+
+  const hasCharacterLength = CHARACTER_LENGTH_TYPES.has(baseType)
+  if (!hasCharacterLength && !NUMERIC_PRECISION_TYPES.has(baseType)) return
+
+  const scalarType = type.replace(/(?:\s*\[\s*\d*\s*\])+$/, '')
+  const declaration = /^[a-z]+(?:\s+[a-z]+)*\s*(?:\(([^()]*)\))?$/i.exec(scalarType)
+  if (!declaration) return `Invalid type declaration "${type}"`
+
+  const parameters = declaration[1]?.trim()
+  if (parameters === undefined) return
+
+  if (hasCharacterLength) {
+    const length = Number(parameters)
+    if (!/^\d+$/.test(parameters) || length < 1 || length > MAX_CHARACTER_LENGTH) {
+      return `Invalid length in "${type}" (expected an integer from 1 to ${MAX_CHARACTER_LENGTH})`
+    }
+    return
+  }
+
+  const numeric = /^(\d+)\s*(?:,\s*(-?\d+))?$/.exec(parameters)
+  if (!numeric) return `Invalid parameters in "${type}" (expected a precision and an optional scale)`
+  const precision = Number(numeric[1])
+  const scale = Number(numeric[2] ?? 0)
+  if (precision < 1 || precision > MAX_NUMERIC_PRECISION) {
+    return `Invalid precision in "${type}" (expected an integer from 1 to ${MAX_NUMERIC_PRECISION})`
+  }
+  if (Math.abs(scale) > MAX_NUMERIC_SCALE) {
+    return `Invalid scale in "${type}" (expected an integer from -${MAX_NUMERIC_SCALE} to ${MAX_NUMERIC_SCALE})`
+  }
 }
 
 export interface DSLDiagnostic { line: number; message: string }
@@ -160,7 +198,10 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
       const colType = modifiers ? definition.slice(0, modifiers.index) : definition
       if (!IDENT.test(colName)) diagnostics.push({ line: lineNo, message: `Invalid column name "${colName}" — latin letters, digits and _ only` })
       else if (!colType) diagnostics.push({ line: lineNo, message: `Column "${colName}" is missing a type` })
-      else if (!isKnownType(colType)) diagnostics.push({ line: lineNo, message: `Unknown type "${colType}" for column "${colName}"` })
+      else {
+        const typeError = columnTypeError(colType)
+        if (typeError) diagnostics.push({ line: lineNo, message: `${typeError} for column "${colName}"` })
+      }
       if (cur && curCols) {
         if (curCols.has(colName)) diagnostics.push({ line: lineNo, message: `Duplicate column "${colName}" in "${cur.name}"` })
         curCols.add(colName)
