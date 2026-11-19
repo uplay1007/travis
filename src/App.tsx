@@ -536,8 +536,16 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     toastTimer.current = setTimeout(() => setToast(null), 3500)
   }, [])
   const layoutsBtnRef = useRef<HTMLDivElement>(null)
-  // live per-layout positions (mirrors masterPositionsRef); folded into schema.layouts on save
-  const layoutPosRef = useRef<Record<string, Record<string, { x: number; y: number }>>>({})
+  // Keep layout position snapshots immutable so the canvas and DSL can share them.
+  const layoutPosRef = useRef<Record<string, Layout['positions']>>({})
+  const layoutPositions = layoutPosRef.current
+  const setLayoutPositions = useCallback((id: string, positions: Layout['positions']) => {
+    layoutPosRef.current = { ...layoutPosRef.current, [id]: positions }
+  }, [])
+  const serializeSchema = useCallback((s: Schema, positions = layoutPosRef.current): Schema => {
+    if (!s.layouts?.length) return s
+    return { ...s, layouts: s.layouts.map(l => ({ ...l, positions: positions[l.id] ?? l.positions })) }
+  }, [])
   const [bulkExpand, setBulkExpand] = useState(true)
   const [bulkKey, setBulkKey] = useState(0)
   // view mode for the non-layout view (All tables + tag groups)
@@ -659,7 +667,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
 
   const displayNodes = useMemo(() => {
     if (activeLayout) {
-      const pos = layoutPosRef.current[activeLayout.id] ?? {}
+      const pos = layoutPositions[activeLayout.id] ?? {}
       return nodes.map(n => ({
         ...n,
         hidden: !scopedVisibleNames?.has(n.id) || hiddenNames.has(n.id),
@@ -674,7 +682,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       }))
     }
     return nodes.map(n => ({ ...n, hidden: !scopedVisibleNames.has(n.id) || hiddenNames.has(n.id) }))
-  }, [nodes, scopedVisibleNames, hiddenNames, activeLayout])
+  }, [nodes, scopedVisibleNames, hiddenNames, activeLayout, layoutPositions])
 
   const displayEdges = useMemo(() => {
     let visibleEdges = edges
@@ -997,7 +1005,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       const { positions } = await computeELKLayout(schema, heights, filter)
       if (validation !== dslStatusRef.current) return
       if (activeLayout) {
-        layoutPosRef.current[activeLayout.id] = { ...(layoutPosRef.current[activeLayout.id] ?? {}), ...positions }
+        setLayoutPositions(activeLayout.id, { ...layoutPosRef.current[activeLayout.id], ...positions })
       } else if (baseTagFilter.size === 0) {
         masterPositionsRef.current = { ...positions }
       }
@@ -1005,10 +1013,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       // save immediately — Organize is a deliberate "commit this result" action,
       // so it can't be left to the 1s drag-debounced autosave: a reload before
       // that timer fires would silently revert to the pre-Organize positions
-      const schemaOut = schema.layouts?.length
-        ? { ...schema, layouts: schema.layouts.map(l => ({ ...l, positions: layoutPosRef.current[l.id] ?? l.positions })) }
-        : schema
-      persistSession(schemaOut)
+      persistSession(serializeSchema(schema))
       // re-frame the camera on the freshly arranged tables
       setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
     } catch (err) {
@@ -1016,7 +1021,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     } finally {
       setLayouting(false)
     }
-  }, [schema, layouting, setNodes, baseTagFilter, viewMode, activeLayout, persistSession])
+  }, [schema, layouting, setNodes, baseTagFilter, viewMode, activeLayout, persistSession, setLayoutPositions, serializeSchema])
 
   useEffect(() => {
     if (!pendingELK || layouting || canvasReadOnly || nodes.length === 0) return
@@ -1034,14 +1039,17 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   // (tag-filter view is ephemeral — no persistence)
   const persistPos = useCallback((id: string, pos: { x: number; y: number }) => {
     if (activeLayoutId) {
-      (layoutPosRef.current[activeLayoutId] ??= {})[id] = pos
+      const positions = layoutPosRef.current[activeLayoutId]
+      const previous = positions?.[id]
+      if (previous?.x === pos.x && previous.y === pos.y) return
+      setLayoutPositions(activeLayoutId, { ...positions, [id]: pos })
     } else if (baseTagFilter.size === 0) {
       // fresh object (not an in-place mutation) so consumers that only
       // re-render on reference change (e.g. the JSON editor's live preview
       // of master positions) actually pick up the drag
       masterPositionsRef.current = { ...masterPositionsRef.current, [id]: pos }
     }
-  }, [activeLayoutId, baseTagFilter])
+  }, [activeLayoutId, baseTagFilter, setLayoutPositions])
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     if (dslStatusRef.current.status !== 'valid') {
@@ -1173,7 +1181,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     }
     const id = crypto.randomUUID()
     const name = `Layout ${(schema.layouts?.length ?? 0) + 1}`
-    layoutPosRef.current[id] = positions
+    setLayoutPositions(id, positions)
     const layouts = [...(schema.layouts ?? []), { id, name, tables, positions, viewMode }]
     setSchema({ ...schema, layouts })
     setSelectedTables(new Set()); setHighlightTable(null)
@@ -1182,7 +1190,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     if (tables.length > 0) {
       setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
     }
-  }, [schema, viewMode])
+  }, [schema, viewMode, setLayoutPositions])
 
   const createLayoutFromSelection = useCallback(() => {
     const tables = [...highlightCtxValue.highlighted]
@@ -1243,7 +1251,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       const p = resolved.get(name)
       if (p) posMap[name] = p
     }
-    layoutPosRef.current[target.id] = posMap
+    setLayoutPositions(target.id, posMap)
 
     setSchema({
       ...schema,
@@ -1254,7 +1262,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       setAddTablesOpen(false)
       setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
     }
-  }, [activeLayout, schema, showToast, lang])
+  }, [activeLayout, schema, showToast, lang, setLayoutPositions])
 
   const renameLayout = useCallback((id: string, name: string) => {
     if (!schema || !name.trim()) return
@@ -1263,7 +1271,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
 
   const deleteLayout = useCallback((id: string) => {
     if (!schema) return
-    delete layoutPosRef.current[id]
+    const positions = { ...layoutPosRef.current }
+    delete positions[id]
+    layoutPosRef.current = positions
     setSchema({ ...schema, layouts: (schema.layouts ?? []).filter(l => l.id !== id) })
     setLayoutSettingsId(null)
     if (activeLayoutId === id) selectLayout(null)
@@ -1306,25 +1316,27 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     const ids = new Set(highlightCtxValue.highlighted)
     if (ids.size === 0) return
     const posMap = layoutPosRef.current[activeLayout.id]
-    if (posMap) ids.forEach(id => delete posMap[id])
+    if (posMap) {
+      const remainingPositions = Object.fromEntries(Object.entries(posMap).filter(([id]) => !ids.has(id)))
+      setLayoutPositions(activeLayout.id, remainingPositions)
+    }
     setSchema({
       ...schema,
       layouts: schema.layouts!.map(l => l.id === activeLayout.id ? { ...l, tables: l.tables.filter(name => !ids.has(name)) } : l),
     })
     setSelectedTables(new Set()); setHighlightTable(null)
     showToast(lang === 'ru' ? `Удалено из лэйаута: ${ids.size}` : `Removed from layout: ${ids.size}`)
-  }, [schema, activeLayout, highlightCtxValue.highlighted, lang, showToast])
+  }, [schema, activeLayout, highlightCtxValue.highlighted, lang, showToast, setLayoutPositions])
 
   const t = T[lang]
   const handleEdit = useCallback((table: Table) => {
     if (dslStatusRef.current.status === 'valid') setEditorState(table.name)
   }, [])
 
-  // refresh layouts' stored positions from the live ref before persisting
-  const serializeSchema = useCallback((s: Schema): Schema => {
-    if (!s.layouts?.length) return s
-    return { ...s, layouts: s.layouts.map(l => ({ ...l, positions: layoutPosRef.current[l.id] ?? l.positions })) }
-  }, [])
+  const dslSchema = useMemo(
+    () => splitView && schema ? serializeSchema(schema, layoutPositions) : schema,
+    [splitView, schema, layoutPositions, serializeSchema],
+  )
 
   // Export the whole schema to a draw.io file — one page per TraVis layout
   // plus an "All tables" page, switchable as tabs in draw.io (like sheets in
@@ -1366,20 +1378,18 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       (schemaToUse.layouts ?? []).map(l => [l.id, layoutPosRef.current[l.id] ?? { ...l.positions }])
     )
     setSchema(schemaToUse)
-    persistSession(schemaToUse)
+    persistSession(serializeSchema(schemaToUse))
     const { nodes: n, edges: e } = schemaToFlow(schemaToUse, handleEdit, masterPositionsRef.current, currentNodes)
     setNodes(n)
     setEdges(e)
-  }, [handleEdit, setNodes, setEdges, persistSession])
+  }, [handleEdit, setNodes, setEdges, persistSession, serializeSchema])
 
   const handleSchemaFromEditor = useCallback((newSchema: Schema, masterPositions?: Record<string, { x: number; y: number }>) => {
     // the editor's text is the new ground truth for any positions it touched —
     // override the live per-layout cache so applySchema's "keep live edits"
     // fallback (meant to protect in-session drags on reopen) doesn't clobber
     // what was just typed with stale in-memory values
-    for (const l of newSchema.layouts ?? []) {
-      layoutPosRef.current[l.id] = { ...l.positions }
-    }
+    layoutPosRef.current = Object.fromEntries((newSchema.layouts ?? []).map(l => [l.id, l.positions]))
     applySchema(newSchema, undefined, masterPositions ?? masterPositionsRef.current)
   }, [applySchema])
 
@@ -1914,7 +1924,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               <>
                 <div className={appStyles.splitEditorPane} style={{ width: editorWidth }}>
                   <SchemaEditor
-                    schema={schema}
+                    schema={dslSchema ?? schema}
                     masterPositions={masterPositionsRef.current}
                     draftRef={dslDraftRef}
                     onSchemaChange={handleSchemaFromEditor}
