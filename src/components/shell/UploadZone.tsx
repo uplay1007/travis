@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { detectParser, parseSchema, schemaFileExtensions } from '../../utils/parsers'
 import { getHandleFromDrop, openFilePicker, supportsFileSystemAccess } from '../../utils/fileAccess'
+import { demoSchemas, openDemoSchema } from '../../utils/demoSchemas'
 import { getSaves, deleteDB, type SavedDB } from '../../utils/storage'
 import { T, type Lang } from '../../i18n'
 import type { Schema } from '../../types/schema'
@@ -160,6 +161,39 @@ export function UploadZone({ lang, theme, onThemeToggle, onOpen }: Props) {
         </div>
 
         {error && <p className={styles.error} role="alert">{error}</p>}
+
+        <section className={styles.demos} aria-labelledby="demo-schemas">
+          <h2 id="demo-schemas" className={styles.recentHeading}>{t.demoSchemas}</h2>
+          <ul className={styles.demoList}>
+            {demoSchemas.map(demo => {
+              const { title, description } = t.demos[demo.id]
+              const count = demo.sections.reduce((total, section) => total + section.tables.length, 0)
+              const titleId = `demo-title-${demo.id}`
+              const detailsId = `demo-details-${demo.id}`
+              return (
+                <li key={demo.id}>
+                  <button
+                    type="button"
+                    className={styles.demoCard}
+                    aria-labelledby={titleId}
+                    aria-describedby={detailsId}
+                    disabled={isOpening}
+                    onClick={() => onOpen(openDemoSchema(demo, lang))}
+                  >
+                    <span className={styles.demoHeader}>
+                      <span id={titleId}>{title}</span>
+                      <span className={styles.demoArrow} aria-hidden="true">→</span>
+                    </span>
+                    <span id={detailsId} className={styles.demoDetails}>
+                      <span className={styles.demoDescription}>{description}</span>
+                      <span className={styles.demoCount}>{t.demoTableCount(count)}</span>
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
 
         {saves.length > 0 && (
           <section className={styles.recents} aria-labelledby="recent-projects">
