@@ -102,11 +102,12 @@ function NodesInitializedFitView({ rfRef }: {
 }
 
 function getRelType(table: Table, col: Column): '1:1' | '1:N' | 'N:M' {
-  // a primary key is inherently unique in every real database, even when
-  // the "unique" flag wasn't also (redundantly) ticked — without this, the
-  // most natural way to model a 1:1 (child.id PK+FK -> parent.id) rendered
-  // as 1:N instead, with no obvious way to fix it via the UI.
-  if (col.unique || col.primaryKey) return '1:1'
+  // A single-column primary key is unique. In a junction table, each
+  // member of a composite primary key can repeat independently.
+  if (col.unique) return '1:1'
+  if (col.primaryKey) {
+    return table.columns.some(column => column !== col && column.primaryKey) ? '1:N' : '1:1'
+  }
   const fkCols = table.columns.filter(c => c.foreignKey)
   if (fkCols.length >= 2 && fkCols.length >= table.columns.length - 1) return 'N:M'
   return '1:N'
