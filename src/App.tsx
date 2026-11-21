@@ -26,7 +26,7 @@ import {
   saveCurrentSession, loadCurrentSession, clearCurrentSession, saveDB,
 } from './utils/storage'
 import { TableNode, type TableNodeData } from './components/canvas/TableNode'
-import { HighlightCtx, type HighlightCtxValue } from './contexts/highlight'
+import { HighlightCtx, type HighlightCtxValue, type TableSelectionGesture } from './contexts/highlight'
 import { EdgeHoverCtx, type EdgeEndpoint } from './contexts/edgeHover'
 import { ViewModeCtx, type ViewMode, type ViewModeCtxValue } from './contexts/viewMode'
 import { ThemeCtx } from './contexts/theme'
@@ -39,7 +39,7 @@ import { computeELKLayout } from './services/layoutService'
 import { resolveOverlaps, type Rect } from './utils/separateNodes'
 import { TableEditor } from './components/editor/TableEditor'
 import { Sidebar } from './components/shell/Sidebar'
-import { SchemaEditor } from './components/editor/SchemaEditor'
+import { SchemaEditor, type DSLDraftStatus } from './components/editor/SchemaEditor'
 import { UploadZone, type OpenResult } from './components/shell/UploadZone'
 import { writeToHandle } from './utils/fileAccess'
 import { exportSQL } from './utils/parsers/sql'
@@ -536,8 +536,16 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     toastTimer.current = setTimeout(() => setToast(null), 3500)
   }, [])
   const layoutsBtnRef = useRef<HTMLDivElement>(null)
-  // live per-layout positions (mirrors masterPositionsRef); folded into schema.layouts on save
-  const layoutPosRef = useRef<Record<string, Record<string, { x: number; y: number }>>>({})
+  // Keep layout position snapshots immutable so the canvas and DSL can share them.
+  const layoutPosRef = useRef<Record<string, Layout['positions']>>({})
+  const layoutPositions = layoutPosRef.current
+  const setLayoutPositions = useCallback((id: string, positions: Layout['positions']) => {
+    layoutPosRef.current = { ...layoutPosRef.current, [id]: positions }
+  }, [])
+  const serializeSchema = useCallback((s: Schema, positions = layoutPosRef.current): Schema => {
+    if (!s.layouts?.length) return s
+    return { ...s, layouts: s.layouts.map(l => ({ ...l, positions: positions[l.id] ?? l.positions })) }
+  }, [])
   const [bulkExpand, setBulkExpand] = useState(true)
   const [bulkKey, setBulkKey] = useState(0)
   // view mode for the non-layout view (All tables + tag groups)
@@ -561,7 +569,17 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [applyViewMode, activeLayoutId])
 
   const [splitView, setSplitView] = useState(false)
-  const [schemaValid, setSchemaValid] = useState(true)
+  const dslDraftRef = useRef<string | null>(null)
+  const [dslStatus, setDslStatus] = useState<DSLDraftStatus>('idle')
+  // Update immediately for canvas events; async layout work also checks identity
+  // before applying a result started before the current DSL edit.
+  const dslStatusRef = useRef({ status: dslStatus })
+  const canvasReadOnly = dslStatus !== 'idle'
+  const handleDSLStatus = useCallback((status: DSLDraftStatus) => {
+    if (dslStatusRef.current.status === status) return
+    dslStatusRef.current = { status }
+    setDslStatus(status)
+  }, [])
   const [editorWidth, setEditorWidth] = useState(380)
   const editorWidthRef = useRef(380)
   useEffect(() => { editorWidthRef.current = editorWidth }, [editorWidth])
@@ -649,7 +667,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
 
   const displayNodes = useMemo(() => {
     if (activeLayout) {
-      const pos = layoutPosRef.current[activeLayout.id] ?? {}
+      const pos = layoutPositions[activeLayout.id] ?? {}
       return nodes.map(n => ({
         ...n,
         hidden: !scopedVisibleNames?.has(n.id) || hiddenNames.has(n.id),
@@ -664,7 +682,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       }))
     }
     return nodes.map(n => ({ ...n, hidden: !scopedVisibleNames.has(n.id) || hiddenNames.has(n.id) }))
-  }, [nodes, scopedVisibleNames, hiddenNames, activeLayout])
+  }, [nodes, scopedVisibleNames, hiddenNames, activeLayout, layoutPositions])
 
   const displayEdges = useMemo(() => {
     let visibleEdges = edges
@@ -730,11 +748,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sizesVersion stands in for sizesRef
   }, [edges, scopedVisibleNames, hiddenNames, displayNodes, sizeOf, sizesVersion])
 
-  // React Flow's native selection (marquee, click, shift-click) is the single
-  // source of truth. A multi-selection becomes the highlighted group; a single
-  // selected table focuses it and lights up its FK-connected neighbors. Either
-  // way the previous highlight is replaced, so a stale one can't linger under a
-  // fresh marquee.
+  // Reflect React Flow's marquee and native single selection in the canvas UI.
+  // Modifier clicks update the app's selection through handleTableClick.
   const handleSelectionChange = useCallback(({ nodes: sel }: OnSelectionChangeParams) => {
     const ids = sel.map(n => n.id)
     // XYFlow's own drag machinery force-clears native selection (fires this with
@@ -754,17 +769,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     }
   }, [])
 
-  // A plain click on a table that's already part of a multi-selection drops
-  // just it out of the group. React Flow keeps a clicked member selected on
-  // its own (so the group stays draggable) and its mousedown handler is a
-  // no-op for an already-selected member — so nodesRef still holds the whole
-  // group here. Cmd/Ctrl/Alt clicks are handled by React Flow / handleTableClick.
   const handleNodeClick = useCallback((e: React.MouseEvent, node: Node) => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
-    const selected = nodesRef.current.filter(n => n.selected)
-    if (selected.length > 1 && selected.some(n => n.id === node.id)) {
-      setNodes(nds => nds.map(n => n.id === node.id ? { ...n, selected: false } : n))
-    }
+    setSelectedTables(new Set())
+    setHighlightTable(node.id)
+    // React Flow can keep the marquee group when clicking one of its members.
+    setNodes(current => current.some(n => n.selected && n.id !== node.id)
+      ? current.map(n => n.selected && n.id !== node.id ? { ...n, selected: false } : n)
+      : current)
   }, [setNodes])
 
   // Tags shown in the Groups dropdown, scoped to the current view: every tag
@@ -860,6 +872,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   const prevBaseTagKeyRef = useRef<string>(baseTagKey)
   useEffect(() => {
     if (!schema || activeLayoutId) return
+    const validation = dslStatusRef.current
+    if (validation.status !== 'idle') return
     // only re-frame when the tag selection actually changed — not on content/viewMode edits
     const tagChanged = prevBaseTagKeyRef.current !== baseTagKey
     prevBaseTagKeyRef.current = baseTagKey
@@ -887,6 +901,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     }
 
     computeELKLayout(schema, heights, visibleNames).then(({ positions }) => {
+      if (validation !== dslStatusRef.current) return
       setNodes(prev => prev.map(n =>
         positions[n.id] ? { ...n, position: positions[n.id] } : n
       ))
@@ -899,67 +914,60 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     setSelectedTables(new Set())
   }, [])
 
-  // Click a table header. Plain click goes through React Flow's native
-  // selection (select-one), mirrored into highlightTable/FK-focus by
-  // handleSelectionChange. Cmd and Alt build their own group in the app
-  // state instead — both are kept out of React Flow's native selection (see
-  // TableNode's handleHeaderClick) so they don't get flattened into whatever
-  // 1-or-2-node set React Flow happens to have selected.
-  const handleTableClick = useCallback((name: string, mods: { cmd: boolean; alt: boolean; shift: boolean }) => {
-    if (mods.cmd) {
-      // Toggle exactly the clicked table's membership in the current group —
-      // never its own neighbours. The first cmd-click seeds the group from
-      // the focused table's FK-neighbourhood (so those neighbours stay lit
-      // instead of collapsing down to just the two tables involved).
+  // Modifier gestures build a selection independently of React Flow's marquee.
+  const handleTableClick = useCallback((name: string, gesture: TableSelectionGesture) => {
+    if (!schema || dslStatusRef.current.status !== 'idle') return
+    setNodes(current => current.some(n => n.selected)
+      ? current.map(n => n.selected ? { ...n, selected: false } : n)
+      : current)
+
+    if (gesture === 'toggle') {
       setSelectedTables(prev => {
-        const next = prev.size > 0
-          ? new Set(prev)
-          : (highlightTable && schema ? fkNeighborhood(schema.tables, highlightTable) : new Set<string>())
+        const next = new Set(prev.size > 0 ? prev : highlightTable ? [highlightTable] : [])
         if (next.has(name)) next.delete(name)
         else next.add(name)
         return next
       })
+      setHighlightTable(null)
       return
     }
-    if (mods.shift) {
-      // Promote this table's FK-neighbourhood — the same set a plain click
-      // already lights up for visual context — into a real selectedTables
-      // group (groupMode: true), so it becomes an explicit, draggable-
-      // together group (see handleNodeDragStart/handleNodeDrag's groupMode
-      // gate). Sets the group outright rather than toggling like Cmd does —
-      // one shift-click grabs "this whole connected cluster".
-      if (!schema) return
+    if (gesture === 'related') {
       setHighlightTable(null)
       setSelectedTables(fkNeighborhood(schema.tables, name))
       return
     }
-    if (!mods.alt || !schema) return
     const visibleTables = schema.tables.filter(t =>
       (!scopedVisibleNames || scopedVisibleNames.has(t.name)) && !hiddenNames.has(t.name)
     )
-    // Set the group directly rather than through React Flow selection: with no
-    // exclusive satellites this is just the clicked table, and routing a
-    // single-node selection through handleSelectionChange would turn it into an
-    // FK-focus that lights up the table's neighbours — exactly what Alt should
-    // NOT do. selectedTables takes precedence in highlightCtxValue, so only the
-    // focus + its exclusive satellites light up.
     setHighlightTable(name)
     setSelectedTables(new Set([name, ...exclusiveNeighbors(visibleTables, name)]))
-  }, [schema, scopedVisibleNames, hiddenNames, highlightTable])
+  }, [schema, scopedVisibleNames, hiddenNames, highlightTable, setNodes])
+
+  const handleNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
+    if (!e.shiftKey) return
+    e.preventDefault()
+    handleTableClick(node.id, 'related')
+  }, [handleTableClick])
+
+  const actionSelection = useMemo(() => {
+    const selected = selectedTables.size > 0 ? selectedTables : new Set(highlightTable ? [highlightTable] : [])
+    return new Set((schema?.tables ?? [])
+      .map(t => t.name)
+      .filter(name => selected.has(name) && (!scopedVisibleNames || scopedVisibleNames.has(name)) && !hiddenNames.has(name)))
+  }, [schema, selectedTables, highlightTable, scopedVisibleNames, hiddenNames])
 
   const highlightCtxValue = useMemo((): HighlightCtxValue => {
-    // manual selection mode takes precedence over neighbor highlight
-    if (selectedTables.size > 0) {
-      const lit = new Set(selectedTables)
-      if (highlightTable) lit.add(highlightTable)
-      return { active: true, highlighted: lit, focusTable: highlightTable, groupMode: true, onHighlight: handleTableClick }
+    const focus = highlightTable && actionSelection.has(highlightTable) ? highlightTable : null
+    const groupMode = selectedTables.size > 0
+    return {
+      active: actionSelection.size > 0,
+      highlighted: !groupMode && focus && schema ? fkNeighborhood(schema.tables, focus) : actionSelection,
+      selected: actionSelection,
+      focusTable: focus,
+      groupMode,
+      onHighlight: handleTableClick,
     }
-    if (!highlightTable || !schema) {
-      return { active: false, highlighted: new Set(), focusTable: null, groupMode: false, onHighlight: handleTableClick }
-    }
-    const set = fkNeighborhood(schema.tables, highlightTable)
-    return { active: true, highlighted: set, focusTable: highlightTable, groupMode: false, onHighlight: handleTableClick }
-  }, [highlightTable, selectedTables, schema, handleTableClick, clearHighlight])
+  }, [highlightTable, selectedTables, actionSelection, schema, handleTableClick])
 
   const [edgeHover, setEdgeHover] = useState<{ source: EdgeEndpoint; target: EdgeEndpoint } | null>(null)
   const edgeHoverCtxValue = useMemo(() => ({
@@ -969,7 +977,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }), [edgeHover])
 
   const handleLayout = useCallback(async () => {
-    if (!schema || layouting) return
+    const validation = dslStatusRef.current
+    if (!schema || layouting || validation.status !== 'idle') return
     setLayouting(true)
     try {
       const heights: Record<string, number> = {}
@@ -980,8 +989,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       }
       const filter = activeLayout ? new Set(activeLayout.tables) : undefined
       const { positions } = await computeELKLayout(schema, heights, filter)
+      if (validation !== dslStatusRef.current) return
       if (activeLayout) {
-        layoutPosRef.current[activeLayout.id] = { ...(layoutPosRef.current[activeLayout.id] ?? {}), ...positions }
+        setLayoutPositions(activeLayout.id, { ...layoutPosRef.current[activeLayout.id], ...positions })
       } else if (baseTagFilter.size === 0) {
         masterPositionsRef.current = { ...positions }
       }
@@ -989,10 +999,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       // save immediately — Organize is a deliberate "commit this result" action,
       // so it can't be left to the 1s drag-debounced autosave: a reload before
       // that timer fires would silently revert to the pre-Organize positions
-      const schemaOut = schema.layouts?.length
-        ? { ...schema, layouts: schema.layouts.map(l => ({ ...l, positions: layoutPosRef.current[l.id] ?? l.positions })) }
-        : schema
-      persistSession(schemaOut)
+      persistSession(serializeSchema(schema))
       // re-frame the camera on the freshly arranged tables
       setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
     } catch (err) {
@@ -1000,10 +1007,10 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     } finally {
       setLayouting(false)
     }
-  }, [schema, layouting, setNodes, baseTagFilter, viewMode, activeLayout, persistSession])
+  }, [schema, layouting, setNodes, baseTagFilter, viewMode, activeLayout, persistSession, setLayoutPositions, serializeSchema])
 
   useEffect(() => {
-    if (!pendingELK || layouting || nodes.length === 0) return
+    if (!pendingELK || layouting || canvasReadOnly || nodes.length === 0) return
     const visibleNodes = baseTagFilter.size > 0 && schema
       ? nodes.filter(n => schema.tables.find(t => t.name === n.id)?.tags?.some(tag => baseTagFilter.has(tag)))
       : nodes
@@ -1012,22 +1019,30 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     setPendingELK(false)
     handleLayout()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sizesVersion stands in for sizesRef
-  }, [pendingELK, nodes, layouting, handleLayout, baseTagFilter, schema, sizesVersion])
+  }, [pendingELK, nodes, layouting, handleLayout, baseTagFilter, schema, sizesVersion, canvasReadOnly])
 
   // persist a dragged position to the active view: layout ref, else master
   // (tag-filter view is ephemeral — no persistence)
   const persistPos = useCallback((id: string, pos: { x: number; y: number }) => {
     if (activeLayoutId) {
-      (layoutPosRef.current[activeLayoutId] ??= {})[id] = pos
+      const positions = layoutPosRef.current[activeLayoutId]
+      const previous = positions?.[id]
+      if (previous?.x === pos.x && previous.y === pos.y) return
+      setLayoutPositions(activeLayoutId, { ...positions, [id]: pos })
     } else if (baseTagFilter.size === 0) {
       // fresh object (not an in-place mutation) so consumers that only
       // re-render on reference change (e.g. the JSON editor's live preview
       // of master positions) actually pick up the drag
       masterPositionsRef.current = { ...masterPositionsRef.current, [id]: pos }
     }
-  }, [activeLayoutId, baseTagFilter])
+  }, [activeLayoutId, baseTagFilter, setLayoutPositions])
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    if (dslStatusRef.current.status !== 'idle') {
+      const measurements = changes.filter(change => change.type === 'dimensions')
+      if (measurements.length) onNodesChange(measurements)
+      return
+    }
     onNodesChange(changes)
     changes.forEach(c => {
       if (c.type === 'position' && c.position) persistPos(c.id, c.position)
@@ -1044,16 +1059,18 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   // merely had lit-up neighbours dragged them all along with it — a plain
   // click was supposed to move only the one table you grabbed.
   const handleNodeDragStart = useCallback((_e: MouseEvent | TouchEvent, node: Node) => {
-    if (!highlightCtxValue.groupMode || !highlightCtxValue.highlighted.has(node.id)) return
+    if (dslStatusRef.current.status !== 'idle') return
+    if (!highlightCtxValue.groupMode || !actionSelection.has(node.id)) return
     groupDragOrigins.current = Object.fromEntries(
       nodes
-        .filter(n => highlightCtxValue.highlighted.has(n.id))
+        .filter(n => actionSelection.has(n.id))
         .map(n => [n.id, resolvedPosition(n)])
     )
-  }, [highlightCtxValue.groupMode, highlightCtxValue.highlighted, nodes, resolvedPosition])
+  }, [highlightCtxValue.groupMode, actionSelection, nodes, resolvedPosition])
 
   const handleNodeDrag = useCallback((_e: MouseEvent | TouchEvent, node: Node) => {
-    const isGroupDrag = highlightCtxValue.groupMode && highlightCtxValue.highlighted.has(node.id)
+    if (dslStatusRef.current.status !== 'idle') return
+    const isGroupDrag = highlightCtxValue.groupMode && actionSelection.has(node.id)
 
     persistPos(node.id, { x: node.position.x, y: node.position.y })
 
@@ -1064,18 +1081,19 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     const dy = node.position.y - origin.y
     setNodes(prev => prev.map(n => {
       if (n.id === node.id) return n
-      if (!highlightCtxValue.highlighted.has(n.id)) return n
+      if (!actionSelection.has(n.id)) return n
       const o = groupDragOrigins.current[n.id]
       if (!o) return n
       const newPos = { x: o.x + dx, y: o.y + dy }
       persistPos(n.id, newPos)
       return { ...n, position: newPos }
     }))
-  }, [highlightCtxValue.groupMode, highlightCtxValue.highlighted, setNodes, persistPos])
+  }, [highlightCtxValue.groupMode, actionSelection, setNodes, persistPos])
 
   // Push apart tables that ended up overlapping, from their current on-screen
   // positions and measured sizes. Nodes in `pinned` stay put.
   const separateOverlaps = useCallback((pinned: Set<string>) => {
+    if (dslStatusRef.current.status !== 'idle') return
     const current = nodesRef.current
     if (current.length === 0) return
 
@@ -1101,9 +1119,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [setNodes, persistPos, activeLayout, resolvedPosition])
 
   const handleNodeDragStop = useCallback((_e: MouseEvent | TouchEvent, node: Node) => {
-    // pin only the grabbed node; everything else (incl. highlighted FK
-    // neighbors that moved with it) is pushable, so overlaps within the
-    // highlighted group get resolved too
+    // Pin the grabbed node and let the rest of the selected group adjust,
+    // so overlaps inside the group get resolved too.
     separateOverlaps(new Set([node.id]))
   }, [separateOverlaps])
 
@@ -1149,7 +1166,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     }
     const id = crypto.randomUUID()
     const name = `Layout ${(schema.layouts?.length ?? 0) + 1}`
-    layoutPosRef.current[id] = positions
+    setLayoutPositions(id, positions)
     const layouts = [...(schema.layouts ?? []), { id, name, tables, positions, viewMode }]
     setSchema({ ...schema, layouts })
     setSelectedTables(new Set()); setHighlightTable(null)
@@ -1158,13 +1175,13 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     if (tables.length > 0) {
       setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
     }
-  }, [schema, viewMode])
+  }, [schema, viewMode, setLayoutPositions])
 
   const createLayoutFromSelection = useCallback(() => {
-    const tables = [...highlightCtxValue.highlighted]
+    const tables = [...actionSelection]
     if (tables.length === 0) return
     createLayout(tables)
-  }, [highlightCtxValue.highlighted, createLayout])
+  }, [actionSelection, createLayout])
 
   // Add tables to a layout (the active one by default, or `targetLayoutId` for
   // a cross-layout add): tables already in the target are skipped; existing
@@ -1172,6 +1189,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   // layout among themselves, offset to sit beside the existing cluster, then
   // nudged clear of any overlap.
   const addTablesToLayout = useCallback(async (names: string[], targetLayoutId?: string) => {
+    const validation = dslStatusRef.current
+    if (validation.status !== 'idle') return
     const target = targetLayoutId ? schema?.layouts?.find(l => l.id === targetLayoutId) : activeLayout
     if (!target || !schema) return
     const newNames = names.filter(n => !target.tables.includes(n))
@@ -1183,6 +1202,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     })
 
     const { positions: newPositions } = await computeELKLayout(schema, heights, new Set(newNames))
+    if (validation !== dslStatusRef.current) return
 
     const existingPos = layoutPosRef.current[target.id] ?? {}
     let maxX = 0, minY = 0, any = false
@@ -1216,7 +1236,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       const p = resolved.get(name)
       if (p) posMap[name] = p
     }
-    layoutPosRef.current[target.id] = posMap
+    setLayoutPositions(target.id, posMap)
 
     setSchema({
       ...schema,
@@ -1227,7 +1247,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       setAddTablesOpen(false)
       setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 60)
     }
-  }, [activeLayout, schema, showToast, lang])
+  }, [activeLayout, schema, showToast, lang, setLayoutPositions])
 
   const renameLayout = useCallback((id: string, name: string) => {
     if (!schema || !name.trim()) return
@@ -1236,7 +1256,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
 
   const deleteLayout = useCallback((id: string) => {
     if (!schema) return
-    delete layoutPosRef.current[id]
+    const positions = { ...layoutPosRef.current }
+    delete positions[id]
+    layoutPosRef.current = positions
     setSchema({ ...schema, layouts: (schema.layouts ?? []).filter(l => l.id !== id) })
     setLayoutSettingsId(null)
     if (activeLayoutId === id) selectLayout(null)
@@ -1255,15 +1277,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   // layout's own table list; the table itself (and any other layout it's in)
   // is untouched.
   const hideSelected = useCallback(() => {
-    const ids = [...highlightCtxValue.highlighted]
-    if (ids.length === 0) return
+    if (actionSelection.size === 0) return
     setHiddenTables(prev => {
       const next = new Set(prev[viewKey] ?? [])
-      ids.forEach(id => next.add(id))
+      actionSelection.forEach(id => next.add(id))
       return { ...prev, [viewKey]: next }
     })
     setSelectedTables(new Set()); setHighlightTable(null)
-  }, [highlightCtxValue.highlighted, viewKey])
+  }, [actionSelection, viewKey])
 
   const showHiddenTables = useCallback(() => {
     setHiddenTables(prev => {
@@ -1276,26 +1297,30 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
 
   const deleteSelectedFromLayout = useCallback(() => {
     if (!schema || !activeLayout) return
-    const ids = new Set(highlightCtxValue.highlighted)
+    const ids = actionSelection
     if (ids.size === 0) return
     const posMap = layoutPosRef.current[activeLayout.id]
-    if (posMap) ids.forEach(id => delete posMap[id])
+    if (posMap) {
+      const remainingPositions = Object.fromEntries(Object.entries(posMap).filter(([id]) => !ids.has(id)))
+      setLayoutPositions(activeLayout.id, remainingPositions)
+    }
     setSchema({
       ...schema,
       layouts: schema.layouts!.map(l => l.id === activeLayout.id ? { ...l, tables: l.tables.filter(name => !ids.has(name)) } : l),
     })
     setSelectedTables(new Set()); setHighlightTable(null)
     showToast(lang === 'ru' ? `Удалено из лэйаута: ${ids.size}` : `Removed from layout: ${ids.size}`)
-  }, [schema, activeLayout, highlightCtxValue.highlighted, lang, showToast])
+  }, [schema, activeLayout, actionSelection, lang, showToast, setLayoutPositions])
 
   const t = T[lang]
-  const handleEdit = useCallback((table: Table) => setEditorState(table.name), [])
-
-  // refresh layouts' stored positions from the live ref before persisting
-  const serializeSchema = useCallback((s: Schema): Schema => {
-    if (!s.layouts?.length) return s
-    return { ...s, layouts: s.layouts.map(l => ({ ...l, positions: layoutPosRef.current[l.id] ?? l.positions })) }
+  const handleEdit = useCallback((table: Table) => {
+    if (dslStatusRef.current.status === 'idle') setEditorState(table.name)
   }, [])
+
+  const dslSchema = useMemo(
+    () => splitView && schema ? serializeSchema(schema, layoutPositions) : schema,
+    [splitView, schema, layoutPositions, serializeSchema],
+  )
 
   // Export the whole schema to a draw.io file — one page per TraVis layout
   // plus an "All tables" page, switchable as tabs in draw.io (like sheets in
@@ -1337,20 +1362,18 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       (schemaToUse.layouts ?? []).map(l => [l.id, layoutPosRef.current[l.id] ?? { ...l.positions }])
     )
     setSchema(schemaToUse)
-    persistSession(schemaToUse)
+    persistSession(serializeSchema(schemaToUse))
     const { nodes: n, edges: e } = schemaToFlow(schemaToUse, handleEdit, masterPositionsRef.current, currentNodes)
     setNodes(n)
     setEdges(e)
-  }, [handleEdit, setNodes, setEdges, persistSession])
+  }, [handleEdit, setNodes, setEdges, persistSession, serializeSchema])
 
   const handleSchemaFromEditor = useCallback((newSchema: Schema, masterPositions?: Record<string, { x: number; y: number }>) => {
     // the editor's text is the new ground truth for any positions it touched —
     // override the live per-layout cache so applySchema's "keep live edits"
     // fallback (meant to protect in-session drags on reopen) doesn't clobber
     // what was just typed with stale in-memory values
-    for (const l of newSchema.layouts ?? []) {
-      layoutPosRef.current[l.id] = { ...l.positions }
-    }
+    layoutPosRef.current = Object.fromEntries((newSchema.layouts ?? []).map(l => [l.id, l.positions]))
     applySchema(newSchema, undefined, masterPositions ?? masterPositionsRef.current)
   }, [applySchema])
 
@@ -1497,7 +1520,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [onProjectExit])
 
   const handleEditorSave = useCallback((updated: Table, originalName: string | null) => {
-    if (!schema) return
+    if (!schema || dslStatusRef.current.status !== 'idle') return
     let newTables: Table[]
     if (originalName === null) {
       newTables = [...schema.tables, updated]
@@ -1545,21 +1568,38 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     applySchema({ ...schema, tables: newTables }, undefined, masterPositionsRef.current)
   }, [schema, applySchema])
 
-  const handleDelete = useCallback(async (tableName: string) => {
-    if (!schema) return
-    const ok = await dialog.confirm(lang === 'ru' ? 'Удаление таблицы' : 'Delete table', t.deleteConfirm(tableName))
-    if (!ok) return
-    if (highlightTable === tableName) setHighlightTable(null)
-    setSelectedTables(prev => {
-      if (!prev.has(tableName)) return prev
-      const next = new Set(prev); next.delete(tableName); return next
-    })
-    const newTables = schema.tables.filter(tb => tb.name !== tableName).map(tb => ({
-      ...tb,
-      columns: tb.columns.map(c => c.foreignKey?.table === tableName ? { ...c, foreignKey: undefined } : c)
+  const deleteTables = useCallback(async (names: ReadonlySet<string>) => {
+    const validation = dslStatusRef.current
+    if (!schema || names.size === 0 || validation.status !== 'idle') return
+    const selectedNames = [...names]
+    const title = names.size === 1 ? t.deleteTableTitle : t.deleteTablesTitle
+    const message = names.size === 1 ? t.deleteConfirm(selectedNames[0]) : t.deleteTablesConfirm(selectedNames)
+    const ok = await dialog.confirm(title, message)
+    if (!ok || validation !== dslStatusRef.current) return
+    setHighlightTable(prev => prev && names.has(prev) ? null : prev)
+    setSelectedTables(prev => new Set([...prev].filter(name => !names.has(name))))
+    setHiddenTables(prev => Object.fromEntries(Object.entries(prev).map(([key, hidden]) => [
+      key, new Set([...hidden].filter(name => !names.has(name))),
+    ])))
+
+    const withoutDeletedPositions = (positions: Layout['positions']): Layout['positions'] =>
+      Object.fromEntries(Object.entries(positions).filter(([name]) => !names.has(name)))
+    const tables = schema.tables.filter(table => !names.has(table.name)).map(table => ({
+      ...table,
+      columns: table.columns.map(column => column.foreignKey && names.has(column.foreignKey.table)
+        ? { ...column, foreignKey: undefined }
+        : column),
     }))
-    applySchema({ ...schema, tables: newTables }, undefined, masterPositionsRef.current)
-  }, [schema, applySchema, t, highlightTable, dialog, lang])
+    const layouts = serializeSchema(schema).layouts?.map(layout => ({
+      ...layout,
+      tables: layout.tables.filter(name => !names.has(name)),
+      positions: withoutDeletedPositions(layout.positions),
+    }))
+    layoutPosRef.current = Object.fromEntries((layouts ?? []).map(layout => [layout.id, layout.positions]))
+    applySchema({ ...schema, tables, layouts }, undefined, withoutDeletedPositions(masterPositionsRef.current))
+  }, [schema, applySchema, serializeSchema, t, dialog])
+
+  const handleDelete = useCallback((tableName: string) => deleteTables(new Set([tableName])), [deleteTables])
 
   const handleOpen = useCallback((result: OpenResult) => {
     setFileHandle(result.fileHandle ?? null)
@@ -1597,6 +1637,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           <div className={appStyles.groupsPill} ref={groupsBtnRef}>
             <button
               onClick={() => setGroupsOpen(!groupsOpen)}
+              disabled={canvasReadOnly}
               className={`${appStyles.groupsBtn} ${activeTagFilter.size > 0 ? appStyles.groupsBtnFiltered : ''}`}
             >
               <span className={appStyles.toolBtnIcon}>◎</span>
@@ -1609,7 +1650,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               </span>
               <span className={appStyles.groupsChevron}>▼</span>
             </button>
-            {groupsOpen && (
+            {groupsOpen && !canvasReadOnly && (
               <div className={appStyles.groupsDropdown}>
                 <button
                   onClick={clearActiveTagFilter}
@@ -1646,6 +1687,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           <div className={appStyles.groupsPill} ref={typesBtnRef}>
             <button
               onClick={() => setTypesOpen(o => !o)}
+              disabled={canvasReadOnly}
               className={`${appStyles.groupsBtn} ${activeTypeFilter.size > 0 ? appStyles.groupsBtnFiltered : ''}`}
             >
               <span className={appStyles.toolBtnIcon}>▤</span>
@@ -1656,7 +1698,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               </span>
               <span className={appStyles.groupsChevron}>▼</span>
             </button>
-            {typesOpen && (
+            {typesOpen && !canvasReadOnly && (
               <div className={appStyles.groupsDropdown}>
                 <button
                   onClick={clearActiveTypeFilter}
@@ -1696,12 +1738,13 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           <div className={appStyles.groupsPill} ref={viewModeBtnRef}>
             <button
               onClick={() => setViewModeOpen(o => !o)}
+              disabled={canvasReadOnly}
               className={appStyles.groupsBtn}
             >
               <span className={appStyles.toolBtnLabel}>{VIEW_MODES.find(m => m.value === viewMode)?.[lang]}</span>
               <span className={appStyles.groupsChevron}>▼</span>
             </button>
-            {viewModeOpen && (
+            {viewModeOpen && !canvasReadOnly && (
               <div className={`${appStyles.groupsDropdown} ${appStyles.groupsDropdownNarrow}`}>
                 {VIEW_MODES.map(m => (
                   <button
@@ -1721,6 +1764,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           <div className={appStyles.groupsPill} ref={layoutsBtnRef}>
             <button
               onClick={() => setLayoutsOpen(o => !o)}
+              disabled={canvasReadOnly}
               className={`${appStyles.groupsBtn} ${activeLayout ? appStyles.groupsBtnFiltered : ''}`}
             >
               <span className={appStyles.toolBtnIcon}>▦</span>
@@ -1729,7 +1773,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               </span>
               <span className={appStyles.groupsChevron}>▼</span>
             </button>
-            {layoutsOpen && (
+            {layoutsOpen && !canvasReadOnly && (
               <div className={appStyles.groupsDropdown}>
                 <button
                   onClick={() => selectLayout(null)}
@@ -1786,6 +1830,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
             <div className={appStyles.toolPill}>
               <button
                 onClick={() => toggleLayoutLock(activeLayout.id)}
+                disabled={canvasReadOnly}
                 className={`${appStyles.toolBtn} ${activeLayout.locked ? appStyles.toolBtnActive : ''}`}
                 title={activeLayout.locked
                   ? (lang === 'ru' ? 'Разблокировать лэйаут (разрешить перетаскивание)' : 'Unlock layout (allow dragging)')
@@ -1801,7 +1846,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           <div className={appStyles.toolPill}>
             <button
               onClick={handleLayout}
-              disabled={layouting}
+              disabled={layouting || canvasReadOnly}
               className={`${appStyles.toolBtn} ${layouting ? appStyles.toolBtnDisabled : ''}`}
               title="Auto-arrange tables (ELK)"
             >
@@ -1813,7 +1858,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           {/* Schema editor split view */}
           <div className={appStyles.toolPill}>
             <button
-              onClick={() => { setSplitView(v => !v); setSchemaValid(true) }}
+              onClick={() => setSplitView(v => !v)}
               className={`${appStyles.toolBtn} ${splitView ? appStyles.toolBtnActive : ''}`}
               title={lang === 'ru' ? 'Переключить редактор схемы (DSL)' : 'Toggle schema editor (DSL)'}
               aria-pressed={splitView}
@@ -1878,7 +1923,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
             {splitView ? (
               <>
                 <div className={appStyles.splitEditorPane} style={{ width: editorWidth }}>
-                  <SchemaEditor schema={schema} masterPositions={masterPositionsRef.current} onSchemaChange={handleSchemaFromEditor} onValidityChange={setSchemaValid} width={editorWidth} />
+                  <SchemaEditor
+                    schema={dslSchema ?? schema}
+                    masterPositions={masterPositionsRef.current}
+                    draftRef={dslDraftRef}
+                    onSchemaChange={handleSchemaFromEditor}
+                    onStatusChange={handleDSLStatus}
+                    width={editorWidth}
+                  />
                 </div>
                 <div className={appStyles.resizeHandle} onMouseDown={handleResizeStart} />
               </>
@@ -1886,6 +1938,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               <Sidebar
                 tables={schema.tables}
                 lang={lang}
+                readOnly={canvasReadOnly}
                 onLangToggle={() => setLang(l => l === 'en' ? 'ru' : 'en')}
                 onNew={() => setEditorState('new')}
                 onEdit={handleEdit}
@@ -1897,13 +1950,13 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               {/* Top-left selection/layout actions row: Create-layout or Add-table,
                   plus Hide/Show/Delete-from-layout when applicable. All the same
                   row so they don't stack into separate absolute-positioned FABs. */}
-              <div className={appStyles.topLeftFabRow}>
+              {!canvasReadOnly && <div className={appStyles.topLeftFabRow}>
                 {/* Create-layout button — appears when a table (or group) is selected */}
-                {highlightCtxValue.highlighted.size > 0 && !activeLayout && (
+                {actionSelection.size > 0 && !activeLayout && (
                   <button className={`${appStyles.createLayoutFab} ${appStyles.fabInWrap}`} onClick={createLayoutFromSelection}>
                     <span className={appStyles.createLayoutFabIcon}>▦</span>
                     {lang === 'ru' ? 'Создать слой' : 'Create layout'}
-                    <span className={appStyles.createLayoutFabCount}>{highlightCtxValue.highlighted.size}</span>
+                    <span className={appStyles.createLayoutFabCount}>{actionSelection.size}</span>
                   </button>
                 )}
 
@@ -1916,11 +1969,11 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
                 )}
 
                 {/* Hide — removes the current selection (and its edges) from this view only */}
-                {highlightCtxValue.highlighted.size > 0 && (
+                {actionSelection.size > 0 && (
                   <button className={`${appStyles.actionFab} ${appStyles.fabInWrap}`} onClick={hideSelected}>
                     <span className={appStyles.createLayoutFabIcon}>⊘</span>
                     {lang === 'ru' ? 'Скрыть' : 'Hide'}
-                    <span className={appStyles.createLayoutFabCount}>{highlightCtxValue.highlighted.size}</span>
+                    <span className={appStyles.createLayoutFabCount}>{actionSelection.size}</span>
                   </button>
                 )}
 
@@ -1933,22 +1986,21 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
                   </button>
                 )}
 
-                {/* Delete — removes the selection from THIS layout only, never from the schema */}
-                {activeLayout && highlightCtxValue.highlighted.size > 0 && (
+                {actionSelection.size > 0 && (
                   <button
                     className={`${appStyles.actionFab} ${appStyles.actionFabDanger} ${appStyles.fabInWrap}`}
-                    onClick={deleteSelectedFromLayout}
-                    title={lang === 'ru' ? 'Удалить выбранные таблицы из этого лэйаута (в схеме останутся)' : 'Remove the selected tables from this layout (they stay in the schema)'}
+                    onClick={activeLayout ? deleteSelectedFromLayout : () => deleteTables(actionSelection)}
+                    title={activeLayout ? t.deleteFromLayout : t.deleteFromSchema}
                   >
                     <span className={appStyles.createLayoutFabIcon}>🗑</span>
                     {lang === 'ru' ? 'Удалить' : 'Delete'}
-                    <span className={appStyles.createLayoutFabCount}>{highlightCtxValue.highlighted.size}</span>
+                    <span className={appStyles.createLayoutFabCount}>{actionSelection.size}</span>
                   </button>
                 )}
-              </div>
+              </div>}
 
               {/* Add-to-layout — quick-add the selection to any OTHER existing layout */}
-              {highlightCtxValue.highlighted.size > 0 && (schema.layouts ?? []).some(l => l.id !== activeLayoutId) && (
+              {!canvasReadOnly && actionSelection.size > 0 && (schema.layouts ?? []).some(l => l.id !== activeLayoutId) && (
                 <div className={appStyles.addToLayoutWrap}>
                   <button
                     className={`${appStyles.createLayoutFab} ${appStyles.fabInWrap}`}
@@ -1956,7 +2008,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
                   >
                     <span className={appStyles.createLayoutFabIcon}>⤵</span>
                     {lang === 'ru' ? 'Добавить в слой' : 'Add to layout'}
-                    <span className={appStyles.createLayoutFabCount}>{highlightCtxValue.highlighted.size}</span>
+                    <span className={appStyles.createLayoutFabCount}>{actionSelection.size}</span>
                   </button>
                   {addToLayoutOpen && (
                     <div className={appStyles.addToLayoutMenu}>
@@ -1965,7 +2017,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
                           key={l.id}
                           className={appStyles.addToLayoutItem}
                           onClick={() => {
-                            addTablesToLayout([...highlightCtxValue.highlighted], l.id)
+                            addTablesToLayout([...actionSelection], l.id)
                             setAddToLayoutOpen(false)
                             setSelectedTables(new Set()); setHighlightTable(null)
                           }}
@@ -1983,31 +2035,35 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               {toast && <div className={appStyles.toast}>{toast}</div>}
 
               <ThemeCtx.Provider value={theme}>
-              <ViewModeCtx.Provider value={{ mode: viewMode, bulkExpand, bulkKey }}>
+              <ViewModeCtx.Provider value={{ mode: viewMode, bulkExpand, bulkKey, readOnly: canvasReadOnly }}>
                 <HighlightCtx.Provider value={highlightCtxValue}>
                  <EdgeHoverCtx.Provider value={edgeHoverCtxValue}>
                     <ReactFlow
                       nodes={displayNodes}
                       edges={displayEdges}
                       onNodesChange={handleNodesChange}
-                      onEdgesChange={onEdgesChange}
+                      onEdgesChange={canvasReadOnly ? undefined : onEdgesChange}
                       onNodeDragStart={handleNodeDragStart}
                       onNodeDrag={handleNodeDrag}
                       onNodeDragStop={handleNodeDragStop}
-                      onSelectionChange={handleSelectionChange}
-                      onNodeClick={handleNodeClick}
-                      onPaneClick={clearHighlight}
+                      onSelectionChange={canvasReadOnly ? undefined : handleSelectionChange}
+                      onNodeClick={canvasReadOnly ? undefined : handleNodeClick}
+                      onNodeContextMenu={canvasReadOnly ? undefined : handleNodeContextMenu}
+                      onPaneClick={canvasReadOnly ? undefined : clearHighlight}
                       nodeTypes={NODE_TYPES}
                       edgeTypes={EDGE_TYPES}
                       fitView
                       fitViewOptions={{ padding: 0.2 }}
                       minZoom={0.05}
-                      nodesDraggable={!activeLayout?.locked}
+                      nodesDraggable={!canvasReadOnly && !activeLayout?.locked}
+                      nodesConnectable={!canvasReadOnly}
+                      elementsSelectable={!canvasReadOnly}
+                      deleteKeyCode={canvasReadOnly ? null : undefined}
                       selectionMode={SelectionMode.Partial}
                       panOnDrag={[2]}
-                      selectionOnDrag
+                      selectionOnDrag={!canvasReadOnly}
                       selectNodesOnDrag={false}
-                      multiSelectionKeyCode="Shift"
+                      multiSelectionKeyCode={null}
                       panOnScroll={true}
                       onInit={instance => { rfInstanceRef.current = instance }}
                     >
@@ -2029,19 +2085,17 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               </ViewModeCtx.Provider>
               </ThemeCtx.Provider>
 
-              {/* Non-blocking notice while the schema editor has errors — the
-                  invalid draft never reaches `schema` (see SchemaEditor's
-                  commit()), so the canvas can't go out of sync with it; no
-                  need to block interaction with the canvas underneath. */}
-              {splitView && !schemaValid && (
-                <div className={appStyles.freezeBanner}>
-                  ⚠ {lang === 'ru' ? 'Исправьте ошибки схемы в редакторе' : 'Fix schema errors in the editor'}
+              {canvasReadOnly && (
+                <div className={appStyles.freezeBanner} role="status">
+                  {dslStatus === 'checking'
+                    ? (lang === 'ru' ? 'Проверка DSL…' : 'Checking DSL…')
+                    : (lang === 'ru' ? 'Холст только для просмотра. Исправьте ошибки в DSL.' : 'Canvas is read-only. Fix the errors in DSL.')}
                 </div>
               )}
 
               {/* Dragging is disabled (nodesDraggable above) while the active
                   layout is locked — tables can still be selected/edited. */}
-              {activeLayout?.locked && (
+              {!canvasReadOnly && activeLayout?.locked && (
                 <div className={appStyles.lockedBanner}>
                   🔒 {lang === 'ru' ? 'Канвас заблокирован' : 'Canvas locked'}
                 </div>

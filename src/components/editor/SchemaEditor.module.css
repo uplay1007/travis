@@ -1,8 +1,13 @@
 .root {
+  --diagnostic-color: #fca5a5;
   display: flex;
   flex-direction: column;
   height: 100%;
   background: var(--bg-input);
+}
+
+:global([data-theme='light']) .root {
+  --diagnostic-color: #b91c1c;
 }
 
 .header {
@@ -44,33 +49,61 @@
   --search-color: #818cf8;
 }
 
-/* Error mini-log — fills remaining header space, scrolls horizontally */
-.log {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin-left: 4px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  overflow-x: auto;
-  overflow-y: hidden;
+.status {
+  margin-inline-start: auto;
+  color: var(--text-secondary);
   white-space: nowrap;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
+}
+
+.statusOk { color: #22c55e; }
+.statusError { color: var(--diagnostic-color); }
+
+.diagnostics {
+  flex: 0 1 auto;
+  max-height: min(10rem, 35%);
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 8px;
+  list-style: none;
+  background: rgb(239 68 68 / 8%);
+  border-bottom: 1px solid rgb(239 68 68 / 22%);
   scrollbar-width: thin;
 }
 
-.log::-webkit-scrollbar { height: 4px; }
-.log::-webkit-scrollbar-thumb { background: rgba(var(--overlay-rgb), 0.2); border-radius: 2px; }
+.diagnosticButton {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 6px 4px;
+  border-radius: 4px;
+  color: var(--text-on-surface);
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
 
-.logOk { color: #22c55e; }
-.logError { color: #f87171; }
+.diagnosticButton:hover {
+  background: rgb(239 68 68 / 12%);
+}
 
-.logOkText { flex-shrink: 0; }
+.diagnosticButton:focus-visible {
+  outline: 2px solid var(--diagnostic-color);
+  outline-offset: -2px;
+}
 
-.logItem {
+.diagnosticLine {
   flex-shrink: 0;
-  font-family: monospace;
+  color: var(--diagnostic-color);
+  font-weight: 650;
+}
+
+.diagnosticMessage {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .searchBar {

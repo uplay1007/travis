@@ -1,4 +1,5 @@
 import type { Schema, Table, Column, Layout } from '../types/schema'
+import { isForeignKeyTarget } from './foreignKeys'
 
 export const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
 
@@ -151,6 +152,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
 
   const lines = text.split('\n')
   let mode: 'none' | 'table' | 'relations' | 'layout' = 'none'
+  let blockStart = 0
   let cur: Table | null = null
   let curCols: Set<string> | null = null
   let curLayoutLines: { line: number; text: string }[] | null = null
@@ -161,6 +163,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
     if (!line || line.startsWith('//') || line.startsWith('--')) continue
 
     if (mode === 'none') {
+      blockStart = lineNo
       if (/^Relations\b/i.test(line)) { mode = 'relations'; continue }
       const lm = /^Layout\s+"([^"]*)"\s*\{?\s*$/i.exec(line)
       if (lm) {
@@ -227,6 +230,10 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
     relLines.push({ line: lineNo, text: line })
   }
 
+  if (mode !== 'none') {
+    diagnostics.push({ line: blockStart, message: `Unclosed ${mode} block — expected "}"` })
+  }
+
   // validate relations against the parsed tables
   for (const { line, text: rel } of relLines) {
     const m = REL_RE.exec(rel)
@@ -244,7 +251,18 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
     // exactly the shape of a composite-PK junction table (product_tags.tag_id
     // is both PK and FK) or a 1:1 extension table (child.id PK referencing
     // parent.id), both legitimate, common patterns.
-    if (!tgtCol.primaryKey && !tgtCol.unique) { diagnostics.push({ line, message: `"${tT}.${tC}" must be a primary key or unique to be referenced` }); continue }
+    if (!isForeignKeyTarget(tgtCol)) { diagnostics.push({ line, message: `"${tT}.${tC}" must be a primary key or unique to be referenced` }); continue }
+    const existing = srcCol.foreignKey
+    if (existing) {
+      const source = `${sT}.${sC}`
+      const target = `${tT}.${tC}`
+      const previousTarget = `${existing.table}.${existing.column}`
+      const message = target === previousTarget
+        ? `Duplicate relation "${source} > ${target}"`
+        : `"${source}" already references "${previousTarget}"`
+      diagnostics.push({ line, message })
+      continue
+    }
     srcCol.foreignKey = { table: tT, column: tC }
   }
 

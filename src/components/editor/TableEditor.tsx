@@ -375,6 +375,7 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
       {fkPickerRow !== null && columns[fkPickerRow] && (
         <FKPicker
           tables={otherTables}
+          lang={lang}
           value={columns[fkPickerRow].foreignKey}
           onChange={foreignKey => updateCol(fkPickerRow, { foreignKey })}
           onClose={() => setFkPickerRow(null)}

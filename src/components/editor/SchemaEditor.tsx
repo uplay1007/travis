@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, type MutableRefObject } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
-import { EditorView } from '@codemirror/view'
+import { EditorView, type ViewUpdate } from '@codemirror/view'
 import { StreamLanguage } from '@codemirror/language'
-import { linter, type Diagnostic } from '@codemirror/lint'
+import { linter, setDiagnostics, type Diagnostic } from '@codemirror/lint'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { schemaToDSL, dslToSchema, type DSLDiagnostic } from '../../utils/schemaDSL'
 import type { Schema } from '../../types/schema'
@@ -35,63 +35,80 @@ const schemaLang = StreamLanguage.define<Record<string, never>>({
   tokenTable: {},
 })
 
-// underline lines that fail validation
-const dslLinter = linter(view => {
-  const { diagnostics } = dslToSchema(view.state.doc.toString())
+const DSL_EXTENSIONS = [schemaLang, linter(null)]
+
+function showDiagnostics(view: EditorView, diagnostics: DSLDiagnostic[]) {
   const total = view.state.doc.lines
-  return diagnostics.map((d): Diagnostic => {
+  const markers = diagnostics.map((d): Diagnostic => {
     const line = view.state.doc.line(Math.min(Math.max(d.line, 1), total))
     return { from: line.from, to: line.to, severity: 'error', message: d.message }
   })
-}, { delay: 350 })
+  view.dispatch(setDiagnostics(view.state, markers))
+}
 
 type Positions = Record<string, { x: number; y: number }>
+export type DSLDraftStatus = 'idle' | 'checking' | 'invalid'
+
+interface Validation {
+  text: string
+  diagnostics: DSLDiagnostic[]
+}
 
 interface Props {
   schema: Schema
   masterPositions: Positions
+  draftRef: MutableRefObject<string | null>
   onSchemaChange: (schema: Schema, masterPositions?: Positions) => void
-  onValidityChange?: (valid: boolean) => void
+  onStatusChange: (status: DSLDraftStatus) => void
   width?: number
 }
 
-export function SchemaEditor({ schema, masterPositions, onSchemaChange, onValidityChange, width = 380 }: Props) {
+export function SchemaEditor({ schema, masterPositions, draftRef, onSchemaChange, onStatusChange, width = 380 }: Props) {
   const fontSize = Math.max(11, Math.min(16, Math.round(13 * width / 380)))
   const schemaRef = useRef(schema)
   schemaRef.current = schema
   const masterPositionsRef = useRef(masterPositions)
   masterPositionsRef.current = masterPositions
 
-  const [text, setText] = useState(() => schemaToDSL(schema, masterPositions))
+  const [text, setText] = useState(() => draftRef.current ?? schemaToDSL(schema, masterPositions))
   const textRef = useRef(text)
-  const [diagnostics, setDiagnostics] = useState<DSLDiagnostic[]>([])
+  const [validation, setValidation] = useState<Validation | null>(null)
+  const validationRef = useRef<Validation | null>(null)
   const isFocused = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editorViewRef = useRef<EditorView | null>(null)
 
-  // parse, validate and (if valid) apply — shared by the debounced timer and
-  // the flush-on-blur/unmount paths below. Returns whether it committed.
-  const commit = useCallback((value: string) => {
-    const { schema: parsed, diagnostics: diags, masterPositions: parsedMaster } = dslToSchema(value, schemaRef.current)
-    setDiagnostics(diags)
-    onValidityChange?.(diags.length === 0)
-    if (diags.length === 0) onSchemaChange(parsed, parsedMaster)
-    return diags.length === 0
-  }, [onSchemaChange, onValidityChange])
+  // One parser result drives the error list, the editor marks and the canvas.
+  const validate = useCallback((value: string, applyDraft: boolean) => {
+    const result = dslToSchema(value, schemaRef.current)
+    const checked = { text: value, diagnostics: result.diagnostics }
+    validationRef.current = checked
+    setValidation(checked)
+    if (result.diagnostics.length) {
+      // Errors from an existing schema stay visible without preventing repairs
+      // in the visual editor. Only an unapplied text draft locks the canvas.
+      onStatusChange(draftRef.current === null ? 'idle' : 'invalid')
+      return
+    }
+    draftRef.current = null
+    if (applyDraft) onSchemaChange(result.schema, result.masterPositions)
+    onStatusChange('idle')
+  }, [draftRef, onSchemaChange, onStatusChange])
+
+  const flushDraft = useCallback(() => {
+    if (debounceRef.current === null) return false
+    clearTimeout(debounceRef.current)
+    debounceRef.current = null
+    validate(textRef.current, true)
+    return true
+  }, [validate])
 
   useEffect(() => {
     return () => {
-      // flush a pending edit instead of silently discarding it — otherwise
-      // closing the panel (or navigating away) within the 400ms debounce
-      // window loses whatever was just typed, and a reload shows the schema
-      // from before that edit was ever applied
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current)
-        commit(textRef.current)
-      }
+      flushDraft()
     }
-  }, [commit])
+  }, [flushDraft])
 
   const [searchQuery, setSearchQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -99,52 +116,61 @@ export function SchemaEditor({ schema, masterPositions, onSchemaChange, onValidi
   const [selectedIdx, setSelectedIdx] = useState(0)
   const [visibleCount, setVisibleCount] = useState(12)
 
+  const syncFromSchema = useCallback(() => {
+    if (debounceRef.current !== null) return
+    // Keep the exact uncommitted text, including after hiding and reopening DSL.
+    const next = draftRef.current ?? schemaToDSL(schemaRef.current, masterPositionsRef.current)
+    if (next === validationRef.current?.text && next === textRef.current) return
+    textRef.current = next
+    setText(next)
+    validate(next, false)
+  }, [draftRef, validate])
+
   useEffect(() => {
-    if (!isFocused.current) {
-      const next = schemaToDSL(schema, masterPositions)
-      setText(next)
-      textRef.current = next
-      // validate the freshly-generated text instead of assuming it's clean —
-      // schemaToDSL is a mechanical dump of the current schema, and that
-      // schema can itself contain something the round-trip considers invalid
-      // (e.g. previously the false-positive on composite-PK+FK columns).
-      // Without this, the header banner said "valid" while the inline linter
-      // (which re-validates independently on its own timer) underlined the
-      // very same lines — sat wrong until the user's next keystroke.
-      const { diagnostics: diags } = dslToSchema(next, schema)
-      setDiagnostics(diags)
-      onValidityChange?.(diags.length === 0)
+    if (!isFocused.current) syncFromSchema()
+  }, [schema, masterPositions, syncFromSchema])
+
+  useEffect(() => {
+    const view = editorViewRef.current
+    if (view && validation?.text === view.state.doc.toString()) {
+      showDiagnostics(view, validation.diagnostics)
     }
-  }, [schema, masterPositions, onValidityChange])
+  }, [validation])
+
+  const handleEditorUpdate = useCallback((update: ViewUpdate) => {
+    const checked = validationRef.current
+    if (!update.docChanged || checked?.text !== update.state.doc.toString()) return
+    // CodeMirror may apply a document update from a prop after the effect above.
+    queueMicrotask(() => {
+      const view = editorViewRef.current
+      if (view === update.view && view.dom.isConnected && view.state.doc === update.state.doc &&
+          checked === validationRef.current) {
+        showDiagnostics(view, checked.diagnostics)
+      }
+    })
+  }, [])
+
+  const diagnostics = validation?.diagnostics ?? []
+  const checking = text !== validation?.text
 
   const handleChange = useCallback((value: string) => {
     setText(value)
     textRef.current = value
+    draftRef.current = value
+    onStatusChange('checking')
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       debounceRef.current = null
-      commit(value)
+      validate(value, true)
     }, 400)
-  }, [commit])
+  }, [draftRef, onStatusChange, validate])
 
   const handleBlur = useCallback((e: React.FocusEvent) => {
     if (!containerRef.current?.contains(e.relatedTarget as Node)) {
       isFocused.current = false
-      // flush a pending edit right away instead of leaving it to the timer —
-      // and don't also reformat from (still stale) schemaRef in that case
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current)
-        debounceRef.current = null
-        commit(textRef.current)
-        return
-      }
-      if (diagnostics.length === 0) {
-        const next = schemaToDSL(schemaRef.current, masterPositionsRef.current)
-        setText(next)
-        textRef.current = next
-      }
+      if (!flushDraft()) syncFromSchema()
     }
-  }, [diagnostics, commit])
+  }, [flushDraft, syncFromSchema])
 
   const tableNames = useMemo(
     () => schema.tables.map(t => t.name),
@@ -172,6 +198,17 @@ export function SchemaEditor({ schema, masterPositions, onSchemaChange, onValidi
     setSearchOpen(false)
     setSearchQuery('')
   }, [])
+
+  const scrollToError = (lineNumber: number) => {
+    const view = editorViewRef.current
+    if (!view) return
+    const line = view.state.doc.line(Math.min(lineNumber, view.state.doc.lines))
+    view.dispatch({
+      selection: { anchor: line.from },
+      effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
+    })
+    view.focus()
+  }
 
   const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Escape') { setSearchOpen(false); setSearchQuery('') }
@@ -202,15 +239,11 @@ export function SchemaEditor({ schema, masterPositions, onSchemaChange, onValidi
           <span>Find table</span>
         </button>
 
-        {/* Error mini-log — scrolls horizontally for long messages */}
-        <div className={`${styles.log} ${diagnostics.length ? styles.logError : styles.logOk}`}>
-          {diagnostics.length === 0
-            ? <span className={styles.logOkText}>✓ valid</span>
-            : diagnostics.map((d, i) => (
-                <span key={i} className={styles.logItem}>⚠ line {d.line}: {d.message}</span>
-              ))
-          }
-        </div>
+        <span role="status" className={`${styles.status} ${checking ? '' : diagnostics.length ? styles.statusError : styles.statusOk}`}>
+          {checking ? 'Checking…' : diagnostics.length === 0
+            ? '✓ valid'
+            : `${diagnostics.length} ${diagnostics.length === 1 ? 'error' : 'errors'}`}
+        </span>
       </div>
 
       {searchOpen && (
@@ -259,12 +292,30 @@ export function SchemaEditor({ schema, masterPositions, onSchemaChange, onValidi
         </div>
       )}
 
+      {diagnostics.length > 0 && (
+        <ul className={styles.diagnostics} aria-label="Schema errors">
+          {diagnostics.map((diagnostic, index) => (
+            <li key={index}>
+              <button
+                type="button"
+                className={styles.diagnosticButton}
+                onClick={() => scrollToError(diagnostic.line)}
+              >
+                <span className={styles.diagnosticLine}>Line {diagnostic.line}</span>
+                <span className={styles.diagnosticMessage}>{diagnostic.message}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <div className={styles.editorWrap}>
         <CodeMirror
           value={text}
           onChange={handleChange}
+          onUpdate={handleEditorUpdate}
           onCreateEditor={view => { editorViewRef.current = view }}
-          extensions={[schemaLang, dslLinter]}
+          extensions={DSL_EXTENSIONS}
           theme={oneDark}
           style={{ fontSize }}
           basicSetup={{

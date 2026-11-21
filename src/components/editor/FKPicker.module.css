@@ -198,7 +198,18 @@
   transition: background 0.15s;
 }
 
-.colBtn:hover {
+.columnHint {
+  padding: 6px 20px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.colBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.colBtn:not(:disabled):hover {
   background: rgba(var(--overlay-rgb), 0.05);
 }
 
