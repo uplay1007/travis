@@ -464,6 +464,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const nodesRef = useRef<Node[]>([])
   useEffect(() => { nodesRef.current = nodes }, [nodes])
+  const rfInstanceRef = useRef<ReactFlowInstance<any, any> | null>(null)
+  const pendingNewTableFit = useRef<{ tableId: string; neighborId: string } | null>(null)
 
   // Real per-node sizes, mirrored out of React Flow's store by NodeMeasureSync.
   // Kept in a ref for callbacks; the version counter is what memos depend on,
@@ -472,6 +474,15 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   const sizesRef = useRef<Record<string, NodeSize>>({})
   const [sizesVersion, setSizesVersion] = useState(0)
   const handleMeasured = useCallback((sizes: Record<string, NodeSize>) => {
+    const pendingFit = pendingNewTableFit.current
+    if (pendingFit && sizes[pendingFit.tableId]) {
+      pendingNewTableFit.current = null
+      void rfInstanceRef.current?.fitView({
+        nodes: [{ id: pendingFit.tableId }, { id: pendingFit.neighborId }],
+        padding: 0.2,
+        duration: 300,
+      })
+    }
     const prev = sizesRef.current
     const keys = Object.keys(sizes)
     const unchanged = keys.length === Object.keys(prev).length &&
@@ -487,7 +498,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   const [editorState, setEditorState] = useState<EditorState>(null)
   const [saveFlash, setSaveFlash] = useState(false)
 
-  const rfInstanceRef = useRef<ReactFlowInstance<any, any> | null>(null)
   const groupsBtnRef = useRef<HTMLDivElement>(null)
 
   const [viewMode, setViewMode] = useState<ViewMode>('full')
@@ -1394,7 +1404,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       // the all-tables ones, which says nothing about a just-restored layout
       const shownPositions = savedLayout ? savedLayout.positions : session.positions
       const hasPositions = shownPositions && Object.keys(shownPositions).length > 0
-      if (!hasPositions) setTimeout(() => setPendingELK(true), 250)
+      if (session.schema.tables.length > 0 && !hasPositions) setTimeout(() => setPendingELK(true), 250)
     }
   }, [session, applySchema, applyViewMode])
 
@@ -1522,8 +1532,26 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   const handleEditorSave = useCallback((updated: Table, originalName: string | null) => {
     if (!schema || dslStatusRef.current.status !== 'idle') return
     let newTables: Table[]
+    let positions = masterPositionsRef.current
     if (originalName === null) {
       newTables = [...schema.tables, updated]
+      positions = { ...positions }
+      let rightmost: { id: string; right: number; y: number } | undefined
+      for (const node of nodesRef.current) {
+        const position = positions[node.id] ?? node.position
+        positions[node.id] = position
+        const right = position.x + sizeOf(node.id).width
+        if (!rightmost || right > rightmost.right) rightmost = { id: node.id, right, y: position.y }
+      }
+      // Assign a position before schemaToFlow lays out the new table by itself.
+      positions[updated.name] = rightmost
+        ? { x: rightmost.right + SIDE_GAP_CLEARANCE, y: rightmost.y }
+        : { x: 0, y: 0 }
+      const visibleInMainView = !scopedVisibleNames && !hiddenNames.has(updated.name) &&
+        (activeTypeFilter.size === 0 || (updated.type && activeTypeFilter.has(updated.type)))
+      if (rightmost && visibleInMainView) {
+        pendingNewTableFit.current = { tableId: updated.name, neighborId: rightmost.id }
+      }
     } else {
       const oldName = originalName
       const newName = updated.name
@@ -1565,8 +1593,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       }
     }
     setEditorState(null)
-    applySchema({ ...schema, tables: newTables }, undefined, masterPositionsRef.current)
-  }, [schema, applySchema])
+    applySchema({ ...schema, tables: newTables }, undefined, positions)
+  }, [schema, applySchema, sizeOf, scopedVisibleNames, hiddenNames, activeTypeFilter])
 
   const deleteTables = useCallback(async (names: ReadonlySet<string>) => {
     const validation = dslStatusRef.current
@@ -1612,7 +1640,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     const positions = allTablesLayout?.positions ?? result.positions
     applySchema(schemaToOpen, undefined, positions)
     const hasPositions = positions && Object.keys(positions).length > 0
-    if (!hasPositions) setTimeout(() => setPendingELK(true), 250)
+    if (schemaToOpen.tables.length > 0 && !hasPositions) setTimeout(() => setPendingELK(true), 250)
   }, [applySchema])
 
   if (!schema) {
