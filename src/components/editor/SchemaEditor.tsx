@@ -47,7 +47,7 @@ function showDiagnostics(view: EditorView, diagnostics: DSLDiagnostic[]) {
 }
 
 type Positions = Record<string, { x: number; y: number }>
-export type DSLStatus = 'valid' | 'checking' | 'invalid'
+export type DSLDraftStatus = 'idle' | 'checking' | 'invalid'
 
 interface Validation {
   text: string
@@ -59,7 +59,7 @@ interface Props {
   masterPositions: Positions
   draftRef: MutableRefObject<string | null>
   onSchemaChange: (schema: Schema, masterPositions?: Positions) => void
-  onStatusChange: (status: DSLStatus) => void
+  onStatusChange: (status: DSLDraftStatus) => void
   width?: number
 }
 
@@ -86,13 +86,14 @@ export function SchemaEditor({ schema, masterPositions, draftRef, onSchemaChange
     validationRef.current = checked
     setValidation(checked)
     if (result.diagnostics.length) {
-      draftRef.current = value
-      onStatusChange('invalid')
+      // Errors from an existing schema stay visible without preventing repairs
+      // in the visual editor. Only an unapplied text draft locks the canvas.
+      onStatusChange(draftRef.current === null ? 'idle' : 'invalid')
       return
     }
     draftRef.current = null
     if (applyDraft) onSchemaChange(result.schema, result.masterPositions)
-    onStatusChange('valid')
+    onStatusChange('idle')
   }, [draftRef, onSchemaChange, onStatusChange])
 
   const flushDraft = useCallback(() => {

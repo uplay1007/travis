@@ -89,13 +89,7 @@ export const TableNode = memo(({ data }: NodeProps) => {
   const isHighlighted = hl.active && hl.highlighted.has(table.name)
   const isDimmed = hl.active && !hl.highlighted.has(table.name)
   const isFocus = hl.active && hl.focusTable === table.name
-  // An EXPLICIT group (Cmd/Alt/Shift-click, marquee — see handleTableClick)
-  // gets its own unmistakable ring. It has to key off hl.groupMode, not React
-  // Flow's native `selected` prop: the app builds those groups in its own
-  // selectedTables state and deliberately keeps them out of native selection,
-  // so `selected` was false for every member and an explicit group rendered
-  // identically to the passive FK-neighbour highlight a plain click lights up.
-  const isMultiSelected = hl.groupMode && hl.highlighted.has(table.name)
+  const isSelected = hl.selected.has(table.name)
 
   // column linked by the currently hovered FK edge (this table's endpoint)
   const linkedCol =
@@ -147,7 +141,7 @@ export const TableNode = memo(({ data }: NodeProps) => {
     styles.node,
     isHighlighted ? styles.nodeHighlighted : '',
     isFocus ? styles.nodeFocus : '',
-    isMultiSelected ? styles.nodeMultiSelected : '',
+    isSelected ? styles.nodeSelected : '',
     isDimmed ? styles.nodeDimmed : '',
   ].filter(Boolean).join(' ')
 

@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react'
 import type { Table, ForeignKey } from '../../types/schema'
 import { tableColor } from '../../utils/colors'
+import { isForeignKeyTarget } from '../../utils/foreignKeys'
+import type { Lang } from '../../i18n'
 import styles from './FKPicker.module.css'
 
 interface Props {
   tables: Table[]
+  lang: Lang
   value: ForeignKey | undefined
   onChange: (fk: ForeignKey | undefined) => void
   onClose: () => void
 }
 
-export function FKPicker({ tables, value, onChange, onClose }: Props) {
+export function FKPicker({ tables, lang, value, onChange, onClose }: Props) {
   const [selectedTable, setSelectedTable] = useState<Table | null>(null)
 
   useEffect(() => {
@@ -55,6 +58,11 @@ export function FKPicker({ tables, value, onChange, onClose }: Props) {
         </div>
 
         <div className={styles.body}>
+          {selectedTable && (
+            <p className={styles.columnHint}>
+              {lang === 'ru' ? 'Для связи выберите столбец с PK или UNIQUE.' : 'Choose a column marked PK or UNIQUE.'}
+            </p>
+          )}
           {!selectedTable ? (
             <>
               {value && (
@@ -99,6 +107,7 @@ export function FKPicker({ tables, value, onChange, onClose }: Props) {
                   key={col.name}
                   onClick={() => handlePickColumn(selectedTable, col.name)}
                   className={styles.colBtn}
+                  disabled={!isForeignKeyTarget(col)}
                 >
                   <div className={styles.colBtnLeft}>
                     <span

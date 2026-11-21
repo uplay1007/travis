@@ -1,4 +1,5 @@
 import type { Schema, Table, Column, Layout } from '../types/schema'
+import { isForeignKeyTarget } from './foreignKeys'
 
 export const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
 
@@ -250,7 +251,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
     // exactly the shape of a composite-PK junction table (product_tags.tag_id
     // is both PK and FK) or a 1:1 extension table (child.id PK referencing
     // parent.id), both legitimate, common patterns.
-    if (!tgtCol.primaryKey && !tgtCol.unique) { diagnostics.push({ line, message: `"${tT}.${tC}" must be a primary key or unique to be referenced` }); continue }
+    if (!isForeignKeyTarget(tgtCol)) { diagnostics.push({ line, message: `"${tT}.${tC}" must be a primary key or unique to be referenced` }); continue }
     const existing = srcCol.foreignKey
     if (existing) {
       const source = `${sT}.${sC}`
