@@ -26,7 +26,7 @@ import {
   saveCurrentSession, loadCurrentSession, clearCurrentSession, saveDB,
 } from './utils/storage'
 import { TableNode, type TableNodeData } from './components/canvas/TableNode'
-import { HighlightCtx, type HighlightCtxValue } from './contexts/highlight'
+import { HighlightCtx, type HighlightCtxValue, type TableSelectionGesture } from './contexts/highlight'
 import { EdgeHoverCtx, type EdgeEndpoint } from './contexts/edgeHover'
 import { ViewModeCtx, type ViewMode, type ViewModeCtxValue } from './contexts/viewMode'
 import { ThemeCtx } from './contexts/theme'
@@ -915,14 +915,13 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [])
 
   // Modifier gestures build a selection independently of React Flow's marquee.
-  const handleTableClick = useCallback((name: string, mods: { cmd: boolean; alt: boolean; shift: boolean }) => {
-    if (dslStatusRef.current.status !== 'idle') return
-    if (!schema || (!mods.cmd && !mods.shift && !mods.alt)) return
+  const handleTableClick = useCallback((name: string, gesture: TableSelectionGesture) => {
+    if (!schema || dslStatusRef.current.status !== 'idle') return
     setNodes(current => current.some(n => n.selected)
       ? current.map(n => n.selected ? { ...n, selected: false } : n)
       : current)
 
-    if (mods.cmd) {
+    if (gesture === 'toggle') {
       setSelectedTables(prev => {
         const next = new Set(prev.size > 0 ? prev : highlightTable ? [highlightTable] : [])
         if (next.has(name)) next.delete(name)
@@ -932,7 +931,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       setHighlightTable(null)
       return
     }
-    if (mods.shift) {
+    if (gesture === 'related') {
       setHighlightTable(null)
       setSelectedTables(fkNeighborhood(schema.tables, name))
       return
@@ -947,7 +946,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   const handleNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
     if (!e.shiftKey) return
     e.preventDefault()
-    handleTableClick(node.id, { cmd: false, alt: false, shift: true })
+    handleTableClick(node.id, 'related')
   }, [handleTableClick])
 
   const actionSelection = useMemo(() => {
@@ -1569,22 +1568,38 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     applySchema({ ...schema, tables: newTables }, undefined, masterPositionsRef.current)
   }, [schema, applySchema])
 
-  const handleDelete = useCallback(async (tableName: string) => {
+  const deleteTables = useCallback(async (names: ReadonlySet<string>) => {
     const validation = dslStatusRef.current
-    if (!schema || validation.status !== 'idle') return
-    const ok = await dialog.confirm(lang === 'ru' ? 'Удаление таблицы' : 'Delete table', t.deleteConfirm(tableName))
+    if (!schema || names.size === 0 || validation.status !== 'idle') return
+    const selectedNames = [...names]
+    const title = names.size === 1 ? t.deleteTableTitle : t.deleteTablesTitle
+    const message = names.size === 1 ? t.deleteConfirm(selectedNames[0]) : t.deleteTablesConfirm(selectedNames)
+    const ok = await dialog.confirm(title, message)
     if (!ok || validation !== dslStatusRef.current) return
-    if (highlightTable === tableName) setHighlightTable(null)
-    setSelectedTables(prev => {
-      if (!prev.has(tableName)) return prev
-      const next = new Set(prev); next.delete(tableName); return next
-    })
-    const newTables = schema.tables.filter(tb => tb.name !== tableName).map(tb => ({
-      ...tb,
-      columns: tb.columns.map(c => c.foreignKey?.table === tableName ? { ...c, foreignKey: undefined } : c)
+    setHighlightTable(prev => prev && names.has(prev) ? null : prev)
+    setSelectedTables(prev => new Set([...prev].filter(name => !names.has(name))))
+    setHiddenTables(prev => Object.fromEntries(Object.entries(prev).map(([key, hidden]) => [
+      key, new Set([...hidden].filter(name => !names.has(name))),
+    ])))
+
+    const withoutDeletedPositions = (positions: Layout['positions']): Layout['positions'] =>
+      Object.fromEntries(Object.entries(positions).filter(([name]) => !names.has(name)))
+    const tables = schema.tables.filter(table => !names.has(table.name)).map(table => ({
+      ...table,
+      columns: table.columns.map(column => column.foreignKey && names.has(column.foreignKey.table)
+        ? { ...column, foreignKey: undefined }
+        : column),
     }))
-    applySchema({ ...schema, tables: newTables }, undefined, masterPositionsRef.current)
-  }, [schema, applySchema, t, highlightTable, dialog, lang])
+    const layouts = serializeSchema(schema).layouts?.map(layout => ({
+      ...layout,
+      tables: layout.tables.filter(name => !names.has(name)),
+      positions: withoutDeletedPositions(layout.positions),
+    }))
+    layoutPosRef.current = Object.fromEntries((layouts ?? []).map(layout => [layout.id, layout.positions]))
+    applySchema({ ...schema, tables, layouts }, undefined, withoutDeletedPositions(masterPositionsRef.current))
+  }, [schema, applySchema, serializeSchema, t, dialog])
+
+  const handleDelete = useCallback((tableName: string) => deleteTables(new Set([tableName])), [deleteTables])
 
   const handleOpen = useCallback((result: OpenResult) => {
     setFileHandle(result.fileHandle ?? null)
@@ -1971,12 +1986,11 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
                   </button>
                 )}
 
-                {/* Delete — removes the selection from THIS layout only, never from the schema */}
-                {activeLayout && actionSelection.size > 0 && (
+                {actionSelection.size > 0 && (
                   <button
                     className={`${appStyles.actionFab} ${appStyles.actionFabDanger} ${appStyles.fabInWrap}`}
-                    onClick={deleteSelectedFromLayout}
-                    title={lang === 'ru' ? 'Удалить выбранные таблицы из этого лэйаута (в схеме останутся)' : 'Remove the selected tables from this layout (they stay in the schema)'}
+                    onClick={activeLayout ? deleteSelectedFromLayout : () => deleteTables(actionSelection)}
+                    title={activeLayout ? t.deleteFromLayout : t.deleteFromSchema}
                   >
                     <span className={appStyles.createLayoutFabIcon}>🗑</span>
                     {lang === 'ru' ? 'Удалить' : 'Delete'}
@@ -2049,7 +2063,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
                       panOnDrag={[2]}
                       selectionOnDrag={!canvasReadOnly}
                       selectNodesOnDrag={false}
-                      multiSelectionKeyCode="Shift"
+                      multiSelectionKeyCode={null}
                       panOnScroll={true}
                       onInit={instance => { rfInstanceRef.current = instance }}
                     >

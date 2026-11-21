@@ -22,6 +22,9 @@
 
 .modal {
   width: min(90vw, 440px);
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
   background: var(--bg-card);
   border: 1px solid rgba(var(--overlay-rgb), 0.1);
   border-radius: 16px;
@@ -31,6 +34,7 @@
 }
 
 .header {
+  flex-shrink: 0;
   padding: 16px 24px;
   border-bottom: 1px solid rgba(var(--overlay-rgb), 0.05);
   display: flex;
@@ -62,6 +66,7 @@
 
 .body {
   padding: 24px;
+  overflow-y: auto;
 }
 
 .message {
@@ -69,6 +74,7 @@
   font-size: 14px;
   line-height: 1.6;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   margin: 0;
 }
 
@@ -92,6 +98,7 @@
 }
 
 .footer {
+  flex-shrink: 0;
   padding: 16px 24px;
   background: rgba(var(--overlay-rgb), 0.05);
   display: flex;

@@ -111,29 +111,13 @@ export const TableNode = memo(({ data }: NodeProps) => {
     ? table.columns.filter(c => c.primaryKey || c.foreignKey).length
     : table.columns.length
 
-  const handleHeaderClick = (e: React.MouseEvent) => {
-    // Alt+click, Cmd/Ctrl+click and Shift+click all build their own selection
-    // group in the app state (see handleTableClick); keep them out of React
-    // Flow's native selection, which would otherwise fire its own 1-or-2-node
-    // selection change and flatten the FK-focus group down to just the
-    // clicked pair.
-    // Check both metaKey and ctrlKey: on macOS Ctrl+click is intercepted as
-    // the native right-click/context-menu gesture before a click event ever
-    // fires (so only metaKey/Cmd is reachable there), but on Windows
-    // Ctrl+click is a perfectly normal click with ctrlKey set — checking
-    // metaKey alone left Windows users' Ctrl+click falling through to React
-    // Flow's native single-select, collapsing whatever group was selected.
-    const toggle = e.metaKey || e.ctrlKey
-    if (e.altKey || toggle || e.shiftKey) e.stopPropagation()
-    hl.onHighlight(table.name, { cmd: toggle, alt: e.altKey, shift: e.shiftKey })
+  const handleModifiedClick = (e: React.MouseEvent) => {
+    if (!e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) return
+    e.stopPropagation()
+    hl.onHighlight(table.name, e.shiftKey || e.metaKey || e.ctrlKey ? 'toggle' : 'exclusive')
   }
 
-  // Also stop the Alt/Cmd/Ctrl/Shift+mousedown so React Flow's drag/select
-  // handler never selects the node (it selects on pointer-down, before the
-  // click fires) — Shift in particular is React Flow's own
-  // multiSelectionKeyCode, which knows nothing about FK relationships and
-  // would otherwise just toggle this one node into its native selection.
-  const handleHeaderMouseDown = (e: React.MouseEvent) => {
+  const handleModifiedMouseDown = (e: React.MouseEvent) => {
     if (e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) e.stopPropagation()
   }
 
@@ -147,7 +131,10 @@ export const TableNode = memo(({ data }: NodeProps) => {
 
   return (
     <div
-      className={nodeClass}
+      // React Flow uses `nokey` to keep Shift+click on a card out of the selection rectangle.
+      className={`${nodeClass} nokey`}
+      onClick={handleModifiedClick}
+      onMouseDown={handleModifiedMouseDown}
       style={{ '--accent': accent, '--accent-glow': `${accent}55`, '--accent-glow2': `${accent}44` } as React.CSSProperties}
     >
       {/* One generic connection point per side of the whole card, not per
@@ -168,7 +155,7 @@ export const TableNode = memo(({ data }: NodeProps) => {
       <Handle type="target" position={Position.Right} id="right" style={{ opacity: 0, width: 8, height: 8 }} />
       <Handle type="source" position={Position.Right} id="right" style={{ opacity: 0, width: 8, height: 8 }} />
 
-      <div className={styles.header} onClick={handleHeaderClick} onMouseDown={handleHeaderMouseDown}>
+      <div className={styles.header}>
         <span className={styles.headerName}>{table.name}</span>
         <div className={styles.headerRight}>
           {table.type ? (
