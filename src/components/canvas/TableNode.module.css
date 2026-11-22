@@ -169,14 +169,11 @@
   gap: 6px;
 }
 
-.columnRowExtended { max-height: 80px; }
+.columnRowExtended { max-height: none; }
 
 .columnComment {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
   margin: 2px 0 1px;
+  padding-inline-start: 30%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--text-secondary);
@@ -198,6 +195,26 @@
 .commentButton svg { width: 15px; height: 15px; }
 .commentButton:hover { background: rgba(var(--overlay-rgb), 0.11); }
 .commentButton:focus-visible { outline: 2px solid #818cf8; outline-offset: -1px; }
+
+.commentTooltip {
+  position: fixed;
+  z-index: 40;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: min(60vh, 320px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 9px 12px;
+  border: 1px solid rgba(var(--overlay-rgb), 0.18);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+  color: var(--text-on-surface);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 /* non-key row collapsed in compact mode */
 .columnRowHidden {

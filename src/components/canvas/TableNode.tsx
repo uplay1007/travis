@@ -1,10 +1,10 @@
-import { useState, useRef, memo, useContext, useEffect } from 'react'
+import { useState, useRef, memo, useContext, useEffect, useId, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Handle, Position, useNodeId, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { tableAccent } from '../../utils/colors'
 import { HighlightCtx } from '../../contexts/highlight'
 import { EdgeHoverCtx } from '../../contexts/edgeHover'
 import { ViewModeCtx } from '../../contexts/viewMode'
-import { useDialog } from '../../contexts/DialogContext'
 import { T } from '../../i18n'
 import type { Table, Column } from '../../types/schema'
 import styles from './TableNode.module.css'
@@ -42,15 +42,105 @@ function Badge({ label, color }: { label: string; color: string }) {
   )
 }
 
-function ColumnRow({ col, accent, linked, hidden }: {
-  col: Column; accent: string; linked: boolean; hidden: boolean
+function ColumnCommentTooltip({ label, comment }: { label: string; comment: string }) {
+  const id = useId()
+  const button = useRef<HTMLButtonElement>(null)
+  const tooltip = useRef<HTMLDivElement>(null)
+  const hideTimer = useRef<ReturnType<typeof setTimeout>>()
+  const [open, setOpen] = useState(false)
+
+  const show = () => {
+    clearTimeout(hideTimer.current)
+    setOpen(true)
+  }
+
+  const hideSoon = () => {
+    if (button.current?.matches(':focus-visible')) return
+    clearTimeout(hideTimer.current)
+    hideTimer.current = setTimeout(() => setOpen(false), 150)
+  }
+
+  useEffect(() => () => clearTimeout(hideTimer.current), [])
+
+  useLayoutEffect(() => {
+    const anchor = button.current
+    const popup = tooltip.current
+    if (!open || !anchor || !popup) return
+
+    const position = () => {
+      const rect = anchor.getBoundingClientRect()
+      const { width, height } = popup.getBoundingClientRect()
+      const margin = 12
+      const gap = 8
+      const x = rect.right + gap + width <= window.innerWidth - margin ? rect.right + gap : rect.left - gap - width
+      const y = rect.top + (rect.height - height) / 2
+      popup.style.left = `${Math.max(margin, Math.min(x, window.innerWidth - width - margin))}px`
+      popup.style.top = `${Math.max(margin, Math.min(y, window.innerHeight - height - margin))}px`
+    }
+    const closeOutside = (event: Event) => {
+      if (event.target instanceof Node && !anchor.contains(event.target) && !popup.contains(event.target)) setOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    position()
+    window.addEventListener('resize', position)
+    window.addEventListener('scroll', position, true)
+    window.addEventListener('pointerdown', closeOutside, true)
+    window.addEventListener('wheel', closeOutside, true)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.removeEventListener('resize', position)
+      window.removeEventListener('scroll', position, true)
+      window.removeEventListener('pointerdown', closeOutside, true)
+      window.removeEventListener('wheel', closeOutside, true)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open, comment])
+
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className={`nodrag ${styles.commentButton}`}
+        aria-label={label}
+        aria-describedby={open ? id : undefined}
+        onPointerEnter={event => { if (event.pointerType !== 'touch') show() }}
+        onPointerLeave={event => { if (event.pointerType !== 'touch') hideSoon() }}
+        onFocus={event => { if (event.currentTarget.matches(':focus-visible')) show() }}
+        onBlur={() => setOpen(false)}
+        onClick={event => {
+          event.stopPropagation()
+          if (event.detail === 0) show()
+        }}
+        onPointerUp={event => {
+          if (event.pointerType === 'touch') setOpen(value => !value)
+        }}
+      >
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M3 3h10v7H8l-3 3v-3H3zM5.5 6h5" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+      </button>
+      {open && createPortal(
+        <div ref={tooltip} id={id} role="tooltip" className={styles.commentTooltip}
+          onPointerEnter={show} onPointerLeave={hideSoon}
+          onClick={event => event.stopPropagation()}>
+          {comment}
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
+function ColumnRow({ col, accent, linked, hidden, expanded }: {
+  col: Column; accent: string; linked: boolean; hidden: boolean; expanded: boolean
 }) {
   const { mode, lang } = useContext(ViewModeCtx)
-  const dialog = useDialog()
   const hasComment = typeof col.comment === 'string' && col.comment.trim().length > 0
-  const comment = !hidden && hasComment && (mode === 'full' || mode === 'extended') ? col.comment : undefined
-  const preview = mode === 'extended' && comment
-  const t = T[lang]
+  const preview = mode === 'extended' && hasComment ? col.comment : undefined
+  const tooltip = expanded && hasComment && (mode === 'full' || mode === 'collapsed') ? col.comment : undefined
   return (
     <div className={`${styles.columnRow} ${linked ? styles.columnRowLinked : ''} ${hidden ? styles.columnRowHidden : ''} ${preview ? styles.columnRowExtended : ''}`}>
       <div className={styles.columnLine}>
@@ -62,18 +152,8 @@ function ColumnRow({ col, accent, linked, hidden }: {
           {col.unique && !col.primaryKey && <Badge label="UQ" color="#06b6d4" />}
           {col.nullable && <Badge label="?" color="#6b7280" />}
         </div>
-        {comment && (
-          <button
-            type="button"
-            className={`nodrag ${styles.commentButton}`}
-            aria-label={t.showColumnComment(col.name)}
-            title={t.showColumnComment(col.name)}
-            onClick={event => { event.stopPropagation(); void dialog.alert(t.showColumnComment(col.name), comment) }}
-          >
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M3 3h10v7H8l-3 3v-3H3zM5.5 6h5" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" strokeLinecap="round" />
-            </svg>
-          </button>
+        {tooltip && (
+          <ColumnCommentTooltip label={T[lang].showColumnComment(col.name)} comment={tooltip} />
         )}
       </div>
       {preview && <p className={styles.columnComment}>{preview}</p>}
@@ -229,6 +309,7 @@ export const TableNode = memo(({ data }: NodeProps) => {
                 accent={accent}
                 linked={col.name === linkedCol}
                 hidden={isCompactHidden(col)}
+                expanded={showColumns}
               />
             ))}
           </div>
