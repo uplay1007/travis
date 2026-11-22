@@ -114,7 +114,11 @@ export const TableNode = memo(({ data }: NodeProps) => {
   const handleModifiedClick = (e: React.MouseEvent) => {
     if (!e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) return
     e.stopPropagation()
-    hl.onHighlight(table.name, e.shiftKey || e.metaKey || e.ctrlKey ? 'toggle' : 'exclusive')
+    if (e.ctrlKey || e.metaKey) {
+      hl.onHighlight(table.name, 'toggle')
+    } else {
+      hl.onHighlight(table.name, e.shiftKey ? 'related' : 'exclusive')
+    }
   }
 
   const handleModifiedMouseDown = (e: React.MouseEvent) => {

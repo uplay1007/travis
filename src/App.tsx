@@ -41,7 +41,7 @@ import { TableEditor } from './components/editor/TableEditor'
 import { Sidebar } from './components/shell/Sidebar'
 import { SchemaEditor, type DSLDraftStatus } from './components/editor/SchemaEditor'
 import { UploadZone, type OpenResult } from './components/shell/UploadZone'
-import { writeToHandle } from './utils/fileAccess'
+import { downloadTextFile, pickSaveFile, writeToHandle } from './utils/fileAccess'
 import { exportSQL } from './utils/parsers/sql'
 import { schemaToStructured } from './utils/structuredJSON'
 import { exportDrawio, type DrawioPage } from './utils/drawioExport'
@@ -400,27 +400,39 @@ function schemaToFlow(
 
 type EditorState = null | 'new' | string
 
+const DELETE_UNDO_MS = 5000
+
+interface PendingDeletion {
+  id: string
+  layoutId: string | null
+  names: ReadonlySet<string>
+  expiresAt: number
+  expired?: boolean
+}
+
+function pendingTableNames(deletions: PendingDeletion[], layoutId: string | null): Set<string> {
+  return new Set(deletions.flatMap(deletion =>
+    deletion.layoutId === null || deletion.layoutId === layoutId ? [...deletion.names] : []
+  ))
+}
+
+const EXPORT_FORMATS = {
+  json: { label: 'JSON', mimeType: 'application/json' },
+  sql: { label: 'SQL', mimeType: 'text/plain' },
+  drawio: { label: 'draw.io', mimeType: 'application/xml' },
+}
+
+type ExportFormat = keyof typeof EXPORT_FORMATS
+
 function withExt(name: string, ext: string): string {
   const trimmed = name.trim()
   if (!trimmed) return `schema.${ext}`
   return trimmed.toLowerCase().endsWith(`.${ext}`) ? trimmed : `${trimmed}.${ext}`
 }
 
-function exportJSON(schema: Schema, masterPositions: Record<string, { x: number; y: number }> = {}, filename = 'schema.json') {
-  const blob = new Blob([JSON.stringify(schemaToStructured(schema, masterPositions), null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
-}
-
-function downloadSQL(schema: Schema, filename = 'schema.sql') {
-  const sql = exportSQL(schema)
-  const blob = new Blob([sql], { type: 'text/plain' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
+function downloadJSON(schema: Schema, masterPositions: Record<string, { x: number; y: number }>) {
+  const content = JSON.stringify(schemaToStructured(schema, masterPositions), null, 2)
+  downloadTextFile(content, EXPORT_FORMATS.json.mimeType, 'schema.json')
 }
 
 export default function App() {
@@ -457,7 +469,10 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   const dialog = useDialog()
 
   const [schema, setSchema] = useState<Schema | null>(session?.schema ?? null)
+  const schemaRef = useRef(schema)
+  schemaRef.current = schema
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null)
+  const [exporting, setExporting] = useState(false)
   const currentSave = useRef(session?.namedSave)
   const hasExited = useRef(false)
 
@@ -546,6 +561,13 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => setToast(null), 3500)
   }, [])
+  useEffect(() => () => clearTimeout(toastTimer.current), [])
+  const [pendingDeletions, setPendingDeletions] = useState<PendingDeletion[]>([])
+  const pendingDeletionsRef = useRef(pendingDeletions)
+  const updatePendingDeletions = useCallback((next: PendingDeletion[]) => {
+    pendingDeletionsRef.current = next
+    setPendingDeletions(next)
+  }, [])
   const layoutsBtnRef = useRef<HTMLDivElement>(null)
   // Keep layout position snapshots immutable so the canvas and DSL can share them.
   const layoutPosRef = useRef<Record<string, Layout['positions']>>({})
@@ -580,6 +602,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [applyViewMode, activeLayoutId])
 
   const [splitView, setSplitView] = useState(false)
+  const [deletionVersion, setDeletionVersion] = useState(0)
   const dslDraftRef = useRef<string | null>(null)
   const [dslStatus, setDslStatus] = useState<DSLDraftStatus>('idle')
   // Update immediately for canvas events; async layout work also checks identity
@@ -633,6 +656,11 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   const activeTagFilter = activeLayoutId ? (layoutTagFilters[activeLayoutId] ?? EMPTY_TAG_SET) : baseTagFilter
   const currentHidden = hiddenTables[viewKey] ?? EMPTY_TAG_SET
   const activeTypeFilter = typeFilters[viewKey] ?? EMPTY_TYPE_SET
+  const pendingInView = useMemo(
+    () => pendingTableNames(pendingDeletions, activeLayoutId),
+    [pendingDeletions, activeLayoutId],
+  )
+  const pendingGlobal = useMemo(() => pendingTableNames(pendingDeletions, null), [pendingDeletions])
 
   // Tables filtered out by the type filter. Kept separate from the tag filter
   // (which re-frames the base view) and folded in with the manual Hide set
@@ -642,13 +670,10 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     return new Set(schema.tables.filter(t => !t.type || !activeTypeFilter.has(t.type)).map(t => t.name))
   }, [schema, activeTypeFilter])
 
-  // everything not drawn in this view for a show/hide reason (manual Hide +
-  // type filter) — the tag filter is handled separately via scopedVisibleNames
-  const hiddenNames = useMemo(() => {
-    if (typeHidden.size === 0) return currentHidden
-    if (currentHidden.size === 0) return typeHidden
-    return new Set([...currentHidden, ...typeHidden])
-  }, [currentHidden, typeHidden])
+  const hiddenNames = useMemo(
+    () => new Set([...currentHidden, ...typeHidden, ...pendingInView]),
+    [currentHidden, typeHidden, pendingInView],
+  )
 
   // Table names visible in the current view before the Hide toggle is
   // applied: layout membership (if any) narrowed by that view's selected
@@ -912,9 +937,10 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     }
 
     computeELKLayout(schema, heights, visibleNames).then(({ positions }) => {
-      if (validation !== dslStatusRef.current) return
+      if (validation !== dslStatusRef.current || schema !== schemaRef.current) return
+      const pending = pendingTableNames(pendingDeletionsRef.current, null)
       setNodes(prev => prev.map(n =>
-        positions[n.id] ? { ...n, position: positions[n.id] } : n
+        positions[n.id] && !pending.has(n.id) ? { ...n, position: positions[n.id] } : n
       ))
       if (tagChanged) setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }), 50)
     })
@@ -924,6 +950,17 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     setHighlightTable(null)
     setSelectedTables(new Set())
   }, [])
+
+  const stageDeletion = useCallback((names: ReadonlySet<string>, layoutId: string | null) => {
+    const deletion = { id: crypto.randomUUID(), names, layoutId, expiresAt: Date.now() + DELETE_UNDO_MS }
+    updatePendingDeletions([...pendingDeletionsRef.current, deletion])
+    clearHighlight()
+  }, [clearHighlight, updatePendingDeletions])
+
+  const undoDeletion = useCallback((deletion: PendingDeletion) => {
+    if (Date.now() >= deletion.expiresAt) return
+    updatePendingDeletions(pendingDeletionsRef.current.filter(item => item.id !== deletion.id))
+  }, [updatePendingDeletions])
 
   // Modifier gestures build a selection independently of React Flow's marquee.
   const handleTableClick = useCallback((name: string, gesture: TableSelectionGesture) => {
@@ -955,6 +992,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [schema, scopedVisibleNames, hiddenNames, highlightTable, setNodes])
 
   const handleNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
+    // macOS reports Control + left click as a context menu with button 0.
+    if (e.ctrlKey && e.button === 0) {
+      e.preventDefault()
+      if (!(e.target instanceof Element && e.target.closest('button'))) {
+        handleTableClick(node.id, 'toggle')
+      }
+      return
+    }
     if (!e.shiftKey) return
     e.preventDefault()
     handleTableClick(node.id, 'related')
@@ -998,13 +1043,20 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
           heights[n.id] = sizeOf(n.id).height
         })
       }
-      const filter = activeLayout ? new Set(activeLayout.tables) : undefined
+      const pending = pendingTableNames(pendingDeletionsRef.current, activeLayoutId)
+      const viewTables = activeLayout?.tables ?? schema.tables.map(table => table.name)
+      const filter = activeLayout || pending.size > 0
+        ? new Set(viewTables.filter(name => !pending.has(name)))
+        : undefined
       const { positions } = await computeELKLayout(schema, heights, filter)
-      if (validation !== dslStatusRef.current) return
+      if (validation !== dslStatusRef.current || schema !== schemaRef.current) return
+      for (const name of pendingTableNames(pendingDeletionsRef.current, activeLayoutId)) {
+        delete positions[name]
+      }
       if (activeLayout) {
         setLayoutPositions(activeLayout.id, { ...layoutPosRef.current[activeLayout.id], ...positions })
       } else if (baseTagFilter.size === 0) {
-        masterPositionsRef.current = { ...positions }
+        masterPositionsRef.current = { ...masterPositionsRef.current, ...positions }
       }
       setNodes(prev => prev.map(n => ({ ...n, position: positions[n.id] ?? n.position })))
       // save immediately — Organize is a deliberate "commit this result" action,
@@ -1018,7 +1070,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     } finally {
       setLayouting(false)
     }
-  }, [schema, layouting, setNodes, baseTagFilter, viewMode, activeLayout, persistSession, setLayoutPositions, serializeSchema])
+  }, [schema, layouting, setNodes, baseTagFilter, viewMode, activeLayout, activeLayoutId, persistSession, setLayoutPositions, serializeSchema])
 
   useEffect(() => {
     if (!pendingELK || layouting || canvasReadOnly || nodes.length === 0) return
@@ -1119,7 +1171,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       rects.set(n.id, { x: p.x, y: p.y, w: s.width, h: s.height })
     }
 
-    const resolved = resolveOverlaps(rects, pinned)
+    const resolved = resolveOverlaps(rects, new Set([...pinned, ...pendingInView]))
 
     resolved.forEach((p, id) => persistPos(id, p))
     setNodes(prev => prev.map(n => {
@@ -1127,7 +1179,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       if (!p || (p.x === n.position.x && p.y === n.position.y)) return n
       return { ...n, position: p }
     }))
-  }, [setNodes, persistPos, activeLayout, resolvedPosition])
+  }, [setNodes, persistPos, activeLayout, resolvedPosition, pendingInView])
 
   const handleNodeDragStop = useCallback((_e: MouseEvent | TouchEvent, node: Node) => {
     // Pin the grabbed node and let the rest of the selected group adjust,
@@ -1213,7 +1265,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     })
 
     const { positions: newPositions } = await computeELKLayout(schema, heights, new Set(newNames))
-    if (validation !== dslStatusRef.current) return
+    if (validation !== dslStatusRef.current || schema !== schemaRef.current) return
 
     const existingPos = layoutPosRef.current[target.id] ?? {}
     let maxX = 0, minY = 0, any = false
@@ -1307,21 +1359,9 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [viewKey])
 
   const deleteSelectedFromLayout = useCallback(() => {
-    if (!schema || !activeLayout) return
-    const ids = actionSelection
-    if (ids.size === 0) return
-    const posMap = layoutPosRef.current[activeLayout.id]
-    if (posMap) {
-      const remainingPositions = Object.fromEntries(Object.entries(posMap).filter(([id]) => !ids.has(id)))
-      setLayoutPositions(activeLayout.id, remainingPositions)
-    }
-    setSchema({
-      ...schema,
-      layouts: schema.layouts!.map(l => l.id === activeLayout.id ? { ...l, tables: l.tables.filter(name => !ids.has(name)) } : l),
-    })
-    setSelectedTables(new Set()); setHighlightTable(null)
-    showToast(lang === 'ru' ? `Удалено из лэйаута: ${ids.size}` : `Removed from layout: ${ids.size}`)
-  }, [schema, activeLayout, actionSelection, lang, showToast, setLayoutPositions])
+    if (!activeLayout || actionSelection.size === 0 || dslStatusRef.current.status !== 'idle') return
+    stageDeletion(actionSelection, activeLayout.id)
+  }, [activeLayout, actionSelection, stageDeletion])
 
   const t = T[lang]
   const handleEdit = useCallback((table: Table) => {
@@ -1336,14 +1376,12 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   // Export the whole schema to a draw.io file — one page per TraVis layout
   // plus an "All tables" page, switchable as tabs in draw.io (like sheets in
   // a spreadsheet), each keeping that view's own table set and positions.
-  const handleExportDrawio = useCallback((filename = 'schema.drawio') => {
-    if (!schema) return
-    const schemaOut = serializeSchema(schema)
+  const getDrawioContent = (schemaOut: Schema, positions: DrawioPage['positions']) => {
     const pages: DrawioPage[] = [
       {
         name: lang === 'ru' ? 'Все таблицы' : 'All tables',
         tables: schemaOut.tables,
-        positions: masterPositionsRef.current,
+        positions,
       },
       ...(schemaOut.layouts ?? []).map(l => ({
         name: l.name,
@@ -1351,14 +1389,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
         positions: l.positions,
       })),
     ]
-    const blob = new Blob([exportDrawio(pages)], { type: 'application/xml' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [schema, serializeSchema, lang])
+    return exportDrawio(pages)
+  }
 
   const applySchema = useCallback((
     s: Schema,
@@ -1372,6 +1404,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     layoutPosRef.current = Object.fromEntries(
       (schemaToUse.layouts ?? []).map(l => [l.id, layoutPosRef.current[l.id] ?? { ...l.positions }])
     )
+    schemaRef.current = schemaToUse
     setSchema(schemaToUse)
     persistSession(serializeSchema(schemaToUse))
     const { nodes: n, edges: e } = schemaToFlow(schemaToUse, handleEdit, masterPositionsRef.current, currentNodes)
@@ -1465,7 +1498,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
       const isSql  = extension === 'sql'
       const isJson = extension === 'json'
       if (!isSql && !isJson) {
-        exportJSON(schemaOut, masterPositionsRef.current)
+        downloadJSON(schemaOut, masterPositionsRef.current)
         dialog.alert(
           lang === 'ru' ? 'Формат файла' : 'File format',
           lang === 'ru'
@@ -1479,7 +1512,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
         await writeToHandle(fileHandle, content)
       } catch (e) {
         console.warn('File write failed, falling back to download', e)
-        exportJSON(schemaOut, masterPositionsRef.current)
+        downloadJSON(schemaOut, masterPositionsRef.current)
         dialog.alert(
           lang === 'ru' ? 'Ошибка записи' : 'Write failed',
           lang === 'ru' ? 'Не удалось сохранить в файл. Схема скачана как копия.' : 'Could not write to file. Schema downloaded as a copy instead.'
@@ -1506,15 +1539,57 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     dialog.alert(lang === 'ru' ? 'Сохранение' : 'Saved', lang === 'ru' ? 'Изменения успешно сохранены!' : 'All changes have been successfully saved.')
   }, [schema, fileHandle, dialog, lang, serializeSchema, persistSession])
 
-  // asks for a filename before an export download; returns null if the user cancels
-  const promptFilename = useCallback(async (ext: string, defaultName: string) => {
-    const name = await dialog.prompt(
-      lang === 'ru' ? 'Имя файла' : 'Filename',
-      lang === 'ru' ? 'Введите имя файла для экспорта' : 'Enter a filename for the export',
-      defaultName
-    )
-    return name === null ? null : withExt(name, ext)
-  }, [dialog, lang])
+  const handleExport = async (format: ExportFormat) => {
+    if (!schema || exporting) return
+    const { label, mimeType } = EXPORT_FORMATS[format]
+    const title = lang === 'ru' ? `Экспорт ${label}` : `Export ${label}`
+    setExporting(true)
+
+    try {
+      // Open the picker while the browser still has the export click's activation.
+      const handle = await pickSaveFile(format, mimeType, label)
+      if (handle === null) return
+
+      const schemaOut = serializeSchema(schema)
+      const positions = masterPositionsRef.current
+
+      let filename = `schema.${format}`
+      if (!handle) {
+        const name = await dialog.prompt(
+          lang === 'ru' ? 'Имя файла' : 'Filename',
+          t.exportDownloadHint,
+          'schema',
+        )
+        if (name === null) return
+        filename = withExt(name, format)
+      }
+
+      let content: string
+      switch (format) {
+        case 'json':
+          content = JSON.stringify(schemaToStructured(schemaOut, positions), null, 2)
+          break
+        case 'sql':
+          content = exportSQL(schemaOut)
+          break
+        case 'drawio':
+          content = getDrawioContent(schemaOut, positions)
+          break
+      }
+
+      if (handle) {
+        await writeToHandle(handle, content)
+        await dialog.alert(title, lang === 'ru' ? 'Файл сохранён.' : 'File saved.')
+      } else {
+        downloadTextFile(content, mimeType, filename)
+      }
+    } catch (error) {
+      console.error('Could not export schema', error)
+      await dialog.alert(title, lang === 'ru' ? 'Не удалось сохранить файл.' : 'Could not save the file.')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1604,29 +1679,69 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     const title = names.size === 1 ? t.deleteTableTitle : t.deleteTablesTitle
     const message = names.size === 1 ? t.deleteConfirm(selectedNames[0]) : t.deleteTablesConfirm(selectedNames)
     const ok = await dialog.confirm(title, message)
-    if (!ok || validation !== dslStatusRef.current) return
-    setHighlightTable(prev => prev && names.has(prev) ? null : prev)
-    setSelectedTables(prev => new Set([...prev].filter(name => !names.has(name))))
-    setHiddenTables(prev => Object.fromEntries(Object.entries(prev).map(([key, hidden]) => [
-      key, new Set([...hidden].filter(name => !names.has(name))),
-    ])))
+    if (!ok || hasExited.current || validation !== dslStatusRef.current) return
+    stageDeletion(names, null)
+  }, [schema, stageDeletion, t, dialog])
 
-    const withoutDeletedPositions = (positions: Layout['positions']): Layout['positions'] =>
-      Object.fromEntries(Object.entries(positions).filter(([name]) => !names.has(name)))
-    const tables = schema.tables.filter(table => !names.has(table.name)).map(table => ({
+  const commitDeletions = useCallback((deletions: PendingDeletion[]) => {
+    const current = schemaRef.current
+    if (!current || hasExited.current) return
+    setDeletionVersion(version => version + 1)
+    const names = pendingTableNames(deletions, null)
+    const layouts = serializeSchema(current).layouts?.map(layout => {
+      const removed = pendingTableNames(deletions, layout.id)
+      if (removed.size === 0) return layout
+      return {
+        ...layout,
+        tables: layout.tables.filter(name => !removed.has(name)),
+        positions: Object.fromEntries(Object.entries(layout.positions).filter(([name]) => !removed.has(name))),
+      }
+    })
+    layoutPosRef.current = Object.fromEntries((layouts ?? []).map(layout => [layout.id, layout.positions]))
+
+    if (names.size === 0) {
+      const next = { ...current, layouts }
+      schemaRef.current = next
+      setSchema(next)
+      persistSession(next)
+      return
+    }
+
+    const tables = current.tables.filter(table => !names.has(table.name)).map(table => ({
       ...table,
       columns: table.columns.map(column => column.foreignKey && names.has(column.foreignKey.table)
         ? { ...column, foreignKey: undefined }
         : column),
     }))
-    const layouts = serializeSchema(schema).layouts?.map(layout => ({
-      ...layout,
-      tables: layout.tables.filter(name => !names.has(name)),
-      positions: withoutDeletedPositions(layout.positions),
-    }))
-    layoutPosRef.current = Object.fromEntries((layouts ?? []).map(layout => [layout.id, layout.positions]))
-    applySchema({ ...schema, tables, layouts }, undefined, withoutDeletedPositions(masterPositionsRef.current))
-  }, [schema, applySchema, serializeSchema, t, dialog])
+    const positions = Object.fromEntries(Object.entries(masterPositionsRef.current).filter(([name]) => !names.has(name)))
+    setHiddenTables(prev => Object.fromEntries(Object.entries(prev).map(([key, hidden]) => [
+      key, new Set([...hidden].filter(name => !names.has(name))),
+    ])))
+    applySchema({ ...current, tables, layouts }, nodesRef.current, positions)
+  }, [applySchema, persistSession, serializeSchema])
+
+  useEffect(() => {
+    const next = pendingDeletions.find(deletion => !canvasReadOnly || !deletion.expired)
+    if (!next) return
+
+    const timer = setTimeout(() => {
+      const now = Date.now()
+      const queue = pendingDeletionsRef.current
+      // Finish once the draft has applied so a pending DSL edit cannot
+      // accidentally reintroduce a table that the timer removed.
+      if (dslStatusRef.current.status !== 'idle') {
+        updatePendingDeletions(queue.map(deletion =>
+          deletion.expiresAt <= now && !deletion.expired ? { ...deletion, expired: true } : deletion
+        ))
+        return
+      }
+      const due = queue.filter(deletion => deletion.expiresAt <= now)
+      if (due.length > 0) commitDeletions(due)
+      updatePendingDeletions(queue.filter(deletion => deletion.expiresAt > now))
+    }, Math.max(0, next.expiresAt - Date.now()))
+
+    return () => clearTimeout(timer)
+  }, [pendingDeletions, canvasReadOnly, commitDeletions, updatePendingDeletions])
 
   const handleDelete = useCallback((tableName: string) => deleteTables(new Set([tableName])), [deleteTables])
 
@@ -1900,34 +2015,22 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
 
         <div className={appStyles.topbarRight}>
           <button
-            onClick={async () => {
-              const filename = await promptFilename('json', 'schema')
-              if (!filename) return
-              exportJSON(serializeSchema(schema), masterPositionsRef.current, filename)
-              dialog.alert(lang === 'ru' ? 'Экспорт JSON' : 'JSON Export', lang === 'ru' ? 'Файл схемы успешно скачан.' : 'The schema file has been successfully downloaded.')
-            }}
+            onClick={() => void handleExport('json')}
+            disabled={exporting}
             className={appStyles.exportBtn}
           >
             ↓ JSON
           </button>
           <button
-            onClick={async () => {
-              const filename = await promptFilename('sql', 'schema')
-              if (!filename) return
-              downloadSQL(schema, filename)
-              dialog.alert(lang === 'ru' ? 'Экспорт SQL' : 'SQL Export', lang === 'ru' ? 'SQL DDL файл успешно скачан.' : 'The SQL DDL file has been successfully downloaded.')
-            }}
+            onClick={() => void handleExport('sql')}
+            disabled={exporting}
             className={appStyles.exportBtn}
           >
             ↓ SQL
           </button>
           <button
-            onClick={async () => {
-              const filename = await promptFilename('drawio', 'schema')
-              if (!filename) return
-              handleExportDrawio(filename)
-              dialog.alert(lang === 'ru' ? 'Экспорт draw.io' : 'draw.io Export', lang === 'ru' ? 'Файл .drawio со всеми лэйаутами (вкладками) успешно скачан.' : 'The .drawio file with all layouts as tabs has been downloaded.')
-            }}
+            onClick={() => void handleExport('drawio')}
+            disabled={exporting}
             className={appStyles.exportBtn}
           >
             ↓ drawio
@@ -1955,6 +2058,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
                   <SchemaEditor
                     schema={dslSchema ?? schema}
                     masterPositions={masterPositionsRef.current}
+                    deletionVersion={deletionVersion}
                     draftRef={dslDraftRef}
                     onSchemaChange={handleSchemaFromEditor}
                     onStatusChange={handleDSLStatus}
@@ -1965,7 +2069,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               </>
             ) : (
               <Sidebar
-                tables={schema.tables}
+                tables={schema.tables.filter(table => !pendingGlobal.has(table.name))}
                 lang={lang}
                 readOnly={canvasReadOnly}
                 onLangToggle={() => setLang(l => l === 'en' ? 'ru' : 'en')}
@@ -2022,7 +2126,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
                     title={activeLayout ? t.deleteFromLayout : t.deleteFromSchema}
                   >
                     <span className={appStyles.createLayoutFabIcon}>🗑</span>
-                    {lang === 'ru' ? 'Удалить' : 'Delete'}
+                    {activeLayout ? t.removeFromLayout : t.delete}
                     <span className={appStyles.createLayoutFabCount}>{actionSelection.size}</span>
                   </button>
                 )}
@@ -2060,8 +2164,24 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
                 </div>
               )}
 
-              {/* Toast — top-right of the canvas, below the topbar */}
-              {toast && <div className={appStyles.toast}>{toast}</div>}
+              <div className={appStyles.toastStack}>
+                {pendingDeletions.slice().reverse().filter(deletion => !deletion.expired).map(deletion => (
+                  <div key={deletion.id} className={appStyles.toast}>
+                    <span role="status">{deletion.layoutId
+                      ? t.removedFromLayout(deletion.names.size)
+                      : t.removedFromSchema(deletion.names.size)}</span>
+                    <button className={appStyles.undoBtn} onClick={() => undoDeletion(deletion)}>
+                      {t.undo}
+                      <svg className={appStyles.undoTimer} aria-hidden="true" viewBox="0 0 20 20">
+                        <circle cx="10" cy="10" r="8" className={appStyles.undoTrack} />
+                        <circle cx="10" cy="10" r="8" pathLength="100" className={appStyles.undoProgress}
+                          style={{ animationDuration: `${DELETE_UNDO_MS}ms` }} />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+                {toast && <div className={appStyles.toast} role="status">{toast}</div>}
+              </div>
 
               <ThemeCtx.Provider value={theme}>
               <ViewModeCtx.Provider value={{ mode: viewMode, bulkExpand, bulkKey, readOnly: canvasReadOnly }}>

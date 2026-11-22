@@ -19,9 +19,46 @@ export async function openFilePicker(accept: readonly string[]): Promise<FileSys
   }
 }
 
+interface SavePickerOptions {
+  suggestedName: string
+  types: { description: string; accept: Record<string, string[]> }[]
+}
+
+// null means the user cancelled. undefined means to use the browser's download flow.
+export async function pickSaveFile(
+  extension: string,
+  mimeType: string,
+  description: string,
+): Promise<FileSystemFileHandle | null | undefined> {
+  const pickerWindow = window as Window & {
+    showSaveFilePicker?: (options: SavePickerOptions) => Promise<FileSystemFileHandle>
+  }
+  if (typeof pickerWindow.showSaveFilePicker !== 'function') return undefined
+
+  try {
+    return await pickerWindow.showSaveFilePicker({
+      suggestedName: `schema.${extension}`,
+      types: [{ description, accept: { [mimeType]: [`.${extension}`] } }],
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return null
+    if (error instanceof DOMException && error.name === 'SecurityError') return undefined
+    throw error
+  }
+}
+
+export function downloadTextFile(content: string, mimeType: string, filename: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type: mimeType }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  // Let the browser start reading the object URL before releasing it.
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 export async function writeToHandle(handle: FileSystemFileHandle, content: string): Promise<void> {
-  const h = handle as unknown as { createWritable(): Promise<{ write(s: string): Promise<void>; close(): Promise<void> }> }
-  const writable = await h.createWritable()
+  const writable = await handle.createWritable()
   await writable.write(content)
   await writable.close()
 }

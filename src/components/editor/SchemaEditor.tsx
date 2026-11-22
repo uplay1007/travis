@@ -57,13 +57,14 @@ interface Validation {
 interface Props {
   schema: Schema
   masterPositions: Positions
+  deletionVersion: number
   draftRef: MutableRefObject<string | null>
   onSchemaChange: (schema: Schema, masterPositions?: Positions) => void
   onStatusChange: (status: DSLDraftStatus) => void
   width?: number
 }
 
-export function SchemaEditor({ schema, masterPositions, draftRef, onSchemaChange, onStatusChange, width = 380 }: Props) {
+export function SchemaEditor({ schema, masterPositions, deletionVersion, draftRef, onSchemaChange, onStatusChange, width = 380 }: Props) {
   const fontSize = Math.max(11, Math.min(16, Math.round(13 * width / 380)))
   const schemaRef = useRef(schema)
   schemaRef.current = schema
@@ -129,6 +130,11 @@ export function SchemaEditor({ schema, masterPositions, draftRef, onSchemaChange
   useEffect(() => {
     if (!isFocused.current) syncFromSchema()
   }, [schema, masterPositions, syncFromSchema])
+
+  // A timer can finish deleting a table while a clean DSL document is focused.
+  useEffect(() => {
+    if (draftRef.current === null) syncFromSchema()
+  }, [deletionVersion, draftRef, syncFromSchema])
 
   useEffect(() => {
     const view = editorViewRef.current
