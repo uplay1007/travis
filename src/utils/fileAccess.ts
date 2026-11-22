@@ -21,6 +21,7 @@ export async function openFilePicker(accept: readonly string[]): Promise<FileSys
 
 interface SavePickerOptions {
   suggestedName: string
+  excludeAcceptAllOption: boolean
   types: { description: string; accept: Record<string, string[]> }[]
 }
 
@@ -39,6 +40,7 @@ export async function pickSaveFile(
   try {
     return await pickerWindow.showSaveFilePicker({
       suggestedName,
+      excludeAcceptAllOption: true,
       types: [{ description, accept: { [mimeType]: [`.${extension}`] } }],
     })
   } catch (error) {

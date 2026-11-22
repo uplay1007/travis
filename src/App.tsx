@@ -427,11 +427,21 @@ const EXPORT_FORMATS = {
 }
 
 type ExportFormat = keyof typeof EXPORT_FORMATS
+const EXPORT_SUFFIX = /\.(json|sql|drawio)$/i
 
 function withExt(name: string, ext: string): string {
   const trimmed = name.trim()
   if (!trimmed) return `schema.${ext}`
   return trimmed.toLowerCase().endsWith(`.${ext}`) ? trimmed : `${trimmed}.${ext}`
+}
+
+function hasMatchingExportName(name: string, format: ExportFormat): boolean {
+  const lowercase = name.toLowerCase()
+  const suffix = `.${format}`
+  if (!lowercase.endsWith(suffix)) return false
+  // A native picker may append the selected extension to a conflicting one.
+  const previous = EXPORT_SUFFIX.exec(lowercase.slice(0, -suffix.length))
+  return !previous || previous[1] === format
 }
 
 function downloadJSON(schema: Schema, masterPositions: Record<string, { x: number; y: number }>) {
@@ -1553,7 +1563,8 @@ function AppContent({ lang, setLang, theme, onThemeToggle, initialProject, onPro
     if (!schema || exporting) return
     const { label, mimeType } = EXPORT_FORMATS[format]
     const title = saveAs ? t.saveAs : `${t.exportFile} ${label}`
-    const suggestedName = withExt(saveAs ? currentSave.current?.name ?? schema.tables[0]?.name ?? 'schema' : 'schema', format)
+    const baseName = saveAs ? currentSave.current?.name ?? schema.tables[0]?.name ?? 'schema' : 'schema'
+    const suggestedName = withExt(baseName.replace(EXPORT_SUFFIX, ''), format)
     setExporting(true)
 
     try {
@@ -1561,10 +1572,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, initialProject, onPro
       const handle = await pickSaveFile(format, mimeType, label, suggestedName)
       if (handle === null) return
 
-      const schemaOut = serializeSchema(schema)
-      const positions = masterPositionsRef.current
-
-      let filename = suggestedName
+      let filename = handle?.name ?? suggestedName
       if (!handle) {
         const name = await dialog.prompt(
           lang === 'ru' ? 'Имя файла' : 'Filename',
@@ -1575,6 +1583,13 @@ function AppContent({ lang, setLang, theme, onThemeToggle, initialProject, onPro
         filename = withExt(name, format)
       }
 
+      if (!hasMatchingExportName(filename, format)) {
+        await dialog.alert(title, t.exportExtensionMismatch(label, format))
+        return
+      }
+
+      const schemaOut = serializeSchema(schema)
+      const positions = masterPositionsRef.current
       let content: string
       switch (format) {
         case 'json':
