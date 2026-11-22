@@ -952,6 +952,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   }, [schema, scopedVisibleNames, hiddenNames, highlightTable, setNodes])
 
   const handleNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
+    // macOS reports Control + left click as a context menu with button 0.
+    if (e.ctrlKey && e.button === 0) {
+      e.preventDefault()
+      if (!(e.target instanceof Element && e.target.closest('button'))) {
+        handleTableClick(node.id, 'toggle')
+      }
+      return
+    }
     if (!e.shiftKey) return
     e.preventDefault()
     handleTableClick(node.id, 'related')
@@ -1502,17 +1510,18 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     setExporting(true)
 
     try {
-      const schemaOut = serializeSchema(schema)
-      const positions = masterPositionsRef.current
-      // The picker needs the click's user activation, so open it before generating the file.
+      // Open the picker while the browser still has the export click's activation.
       const handle = await pickSaveFile(format, mimeType, label)
       if (handle === null) return
+
+      const schemaOut = serializeSchema(schema)
+      const positions = masterPositionsRef.current
 
       let filename = `schema.${format}`
       if (!handle) {
         const name = await dialog.prompt(
           lang === 'ru' ? 'Имя файла' : 'Filename',
-          lang === 'ru' ? 'Введите имя файла для скачивания' : 'Enter a filename for the download',
+          t.exportDownloadHint,
           'schema',
         )
         if (name === null) return
@@ -2040,7 +2049,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
                     title={activeLayout ? t.deleteFromLayout : t.deleteFromSchema}
                   >
                     <span className={appStyles.createLayoutFabIcon}>🗑</span>
-                    {lang === 'ru' ? 'Удалить' : 'Delete'}
+                    {activeLayout ? t.removeFromLayout : t.delete}
                     <span className={appStyles.createLayoutFabCount}>{actionSelection.size}</span>
                   </button>
                 )}
