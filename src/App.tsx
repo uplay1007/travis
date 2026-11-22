@@ -23,7 +23,7 @@ import type { Schema, Table, Column, Layout, TableType } from './types/schema'
 import { computeLayout } from './utils/layout'
 import { tableAccent } from './utils/colors'
 import {
-  saveCurrentSession, loadCurrentSession, clearCurrentSession, saveDB,
+  saveCurrentSession, loadCurrentSession, clearCurrentSession, saveDB, getSaves,
 } from './utils/storage'
 import { TableNode, type TableNodeData } from './components/canvas/TableNode'
 import { HighlightCtx, type HighlightCtxValue, type TableSelectionGesture } from './contexts/highlight'
@@ -40,7 +40,10 @@ import { resolveOverlaps, type Rect } from './utils/separateNodes'
 import { TableEditor } from './components/editor/TableEditor'
 import { Sidebar } from './components/shell/Sidebar'
 import { SchemaEditor, type DSLDraftStatus } from './components/editor/SchemaEditor'
-import { UploadZone, type OpenResult } from './components/shell/UploadZone'
+import { UploadZone } from './components/shell/UploadZone'
+import { FileMenu } from './components/shell/FileMenu'
+import { useSchemaFile, type OpenResult } from './components/shell/useSchemaFile'
+import { schemaFileExtensions } from './utils/parsers'
 import { downloadTextFile, pickSaveFile, writeToHandle } from './utils/fileAccess'
 import { exportSQL } from './utils/parsers/sql'
 import { schemaToStructured } from './utils/structuredJSON'
@@ -172,6 +175,7 @@ const EMPTY_TAG_SET: ReadonlySet<string> = new Set()
 const EMPTY_TYPE_SET: ReadonlySet<TableType> = new Set()
 
 const VIEW_MODES: { value: ViewMode; en: string; ru: string }[] = [
+  { value: 'extended',  en: 'Extended',  ru: 'Расширенный' },
   { value: 'full',      en: 'Full',      ru: 'Полный' },
   { value: 'compact',   en: 'Compact',   ru: 'Компактный' },
   { value: 'collapsed', en: 'Collapsed', ru: 'Свёрнутый' },
@@ -435,9 +439,13 @@ function downloadJSON(schema: Schema, masterPositions: Record<string, { x: numbe
   downloadTextFile(content, EXPORT_FORMATS.json.mimeType, 'schema.json')
 }
 
+function projectSnapshot(schema: Schema, positions: Layout['positions']): string {
+  return JSON.stringify({ schema, positions })
+}
+
 export default function App() {
   const [lang, setLang] = useState<Lang>('en')
-  const [projectKey, setProjectKey] = useState(0)
+  const [project, setProject] = useState<{ key: number; source?: OpenResult }>({ key: 0 })
   const [theme, setTheme] = useState<'dark' | 'light'>(
     () => (localStorage.getItem('travis_theme') === 'light' ? 'light' : 'dark')
   )
@@ -446,24 +454,26 @@ export default function App() {
     localStorage.setItem('travis_theme', theme)
   }, [theme])
   const toggleTheme = useCallback(() => setTheme(t => (t === 'dark' ? 'light' : 'dark')), [])
-  const closeProject = useCallback(() => {
+  const changeProject = useCallback((source?: OpenResult) => {
     clearCurrentSession()
-    setProjectKey(key => key + 1)
+    setProject(current => ({ key: current.key + 1, source }))
   }, [])
 
   return (
     <DialogProvider lang={lang}>
-      <AppContent key={projectKey} lang={lang} setLang={setLang} theme={theme} onThemeToggle={toggleTheme} onProjectExit={closeProject} />
+      <AppContent key={project.key} lang={lang} setLang={setLang} theme={theme} onThemeToggle={toggleTheme}
+        initialProject={project.source} onProjectChange={changeProject} />
     </DialogProvider>
   )
 }
 
-function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
+function AppContent({ lang, setLang, theme, onThemeToggle, initialProject, onProjectChange }: {
   lang: Lang
   setLang: React.Dispatch<React.SetStateAction<Lang>>
   theme: 'dark' | 'light'
   onThemeToggle: () => void
-  onProjectExit: () => void
+  initialProject?: OpenResult
+  onProjectChange: (source?: OpenResult) => void
 }) {
   const session = useMemo(() => loadCurrentSession(), [])
   const dialog = useDialog()
@@ -474,6 +484,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null)
   const [exporting, setExporting] = useState(false)
   const currentSave = useRef(session?.namedSave)
+  const savedSnapshot = useRef<string>()
   const hasExited = useRef(false)
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
@@ -512,7 +523,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
   const masterPositionsRef = useRef<Record<string, { x: number; y: number }>>(session?.positions ?? {})
 
   const [editorState, setEditorState] = useState<EditorState>(null)
-  const [saveFlash, setSaveFlash] = useState(false)
 
   const groupsBtnRef = useRef<HTMLDivElement>(null)
 
@@ -1410,6 +1420,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     const { nodes: n, edges: e } = schemaToFlow(schemaToUse, handleEdit, masterPositionsRef.current, currentNodes)
     setNodes(n)
     setEdges(e)
+    return schemaToUse
   }, [handleEdit, setNodes, setEdges, persistSession, serializeSchema])
 
   const handleSchemaFromEditor = useCallback((newSchema: Schema, masterPositions?: Record<string, { x: number; y: number }>) => {
@@ -1532,33 +1543,33 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
 
     const entry = saveDB(name!, schemaOut, masterPositionsRef.current, saved?.id)
     currentSave.current = { id: entry.id, name: entry.name }
+    savedSnapshot.current = projectSnapshot(schemaOut, masterPositionsRef.current)
     persistSession(schemaOut)
 
-    setSaveFlash(true)
-    setTimeout(() => setSaveFlash(false), 1500)
     dialog.alert(lang === 'ru' ? 'Сохранение' : 'Saved', lang === 'ru' ? 'Изменения успешно сохранены!' : 'All changes have been successfully saved.')
   }, [schema, fileHandle, dialog, lang, serializeSchema, persistSession])
 
-  const handleExport = async (format: ExportFormat) => {
+  const handleExport = useCallback(async (format: ExportFormat, saveAs = false) => {
     if (!schema || exporting) return
     const { label, mimeType } = EXPORT_FORMATS[format]
-    const title = lang === 'ru' ? `Экспорт ${label}` : `Export ${label}`
+    const title = saveAs ? t.saveAs : `${t.exportFile} ${label}`
+    const suggestedName = withExt(saveAs ? currentSave.current?.name ?? schema.tables[0]?.name ?? 'schema' : 'schema', format)
     setExporting(true)
 
     try {
       // Open the picker while the browser still has the export click's activation.
-      const handle = await pickSaveFile(format, mimeType, label)
+      const handle = await pickSaveFile(format, mimeType, label, suggestedName)
       if (handle === null) return
 
       const schemaOut = serializeSchema(schema)
       const positions = masterPositionsRef.current
 
-      let filename = `schema.${format}`
+      let filename = suggestedName
       if (!handle) {
         const name = await dialog.prompt(
           lang === 'ru' ? 'Имя файла' : 'Filename',
           t.exportDownloadHint,
-          'schema',
+          suggestedName.slice(0, -(format.length + 1)),
         )
         if (name === null) return
         filename = withExt(name, format)
@@ -1579,6 +1590,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
 
       if (handle) {
         await writeToHandle(handle, content)
+        if (saveAs) {
+          const name = handle.name.replace(/\.json$/i, '')
+          const entry = saveDB(name, schemaOut, positions)
+          setFileHandle(handle)
+          currentSave.current = { id: entry.id, name: entry.name }
+          savedSnapshot.current = projectSnapshot(schemaOut, positions)
+          persistSession(schemaOut)
+        }
         await dialog.alert(title, lang === 'ru' ? 'Файл сохранён.' : 'File saved.')
       } else {
         downloadTextFile(content, mimeType, filename)
@@ -1589,21 +1608,42 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     } finally {
       setExporting(false)
     }
-  }
+  }, [schema, exporting, lang, t, serializeSchema, dialog, persistSession])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); handleSave() }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && schema) {
+        e.preventDefault()
+        if (!editorState && !exporting) {
+          if (e.shiftKey) void handleExport('json', true)
+          else void handleSave()
+        }
+      }
       if (e.key === 'Escape') clearHighlight()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleSave, clearHighlight])
+  }, [schema, editorState, exporting, handleExport, handleSave, clearHighlight])
 
-  const handleExit = useCallback(() => {
+  const requestProjectChange = async (source?: OpenResult) => {
+    if (schema) {
+      const previous = savedSnapshot.current ?? (() => {
+        const saved = getSaves().find(entry => entry.id === currentSave.current?.id)
+        return saved && projectSnapshot(saved.schema, saved.positions)
+      })()
+      const changed = previous === undefined
+        ? schema.tables.length > 0 || Boolean(schema.layouts?.length)
+        : previous !== projectSnapshot(serializeSchema(schema), masterPositionsRef.current)
+      if ((changed || dslDraftRef.current !== null) && !await dialog.confirm(t.unsavedProject, t.discardProject)) return
+    }
     hasExited.current = true
-    onProjectExit()
-  }, [onProjectExit])
+    onProjectChange(source)
+  }
+  const schemaFile = useSchemaFile(lang, requestProjectChange)
+  const openError = schemaFile.error
+  useEffect(() => {
+    if (openError) showToast(openError)
+  }, [openError, showToast])
 
   const handleEditorSave = useCallback((updated: Table, originalName: string | null) => {
     if (!schema || dslStatusRef.current.status !== 'idle') return
@@ -1754,10 +1794,14 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
     const remaining = allTablesLayout ? result.schema.layouts!.filter(l => l !== allTablesLayout) : undefined
     const schemaToOpen = allTablesLayout ? { ...result.schema, layouts: remaining!.length ? remaining : undefined } : result.schema
     const positions = allTablesLayout?.positions ?? result.positions
-    applySchema(schemaToOpen, undefined, positions)
+    const opened = applySchema(schemaToOpen, undefined, positions)
+    savedSnapshot.current = projectSnapshot(serializeSchema(opened), masterPositionsRef.current)
     const hasPositions = positions && Object.keys(positions).length > 0
     if (schemaToOpen.tables.length > 0 && !hasPositions) setTimeout(() => setPendingELK(true), 250)
-  }, [applySchema])
+  }, [applySchema, serializeSchema])
+  useEffect(() => {
+    if (initialProject) handleOpen(initialProject)
+  }, [initialProject, handleOpen])
 
   if (!schema) {
     return <UploadZone lang={lang} theme={theme} onThemeToggle={onThemeToggle} onOpen={handleOpen} />
@@ -1770,6 +1814,27 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
         <div className={appStyles.topbarBrand}>
           <Logo size={20} />
           <span className={appStyles.topbarLogo}>TraVis</span>
+          <FileMenu
+            lang={lang}
+            busy={exporting || schemaFile.isOpening}
+            onNew={() => void requestProjectChange({ schema: { tables: [] } })}
+            onOpen={() => void schemaFile.pickSchemaFile()}
+            onSave={() => void handleSave()}
+            onSaveAs={() => void handleExport('json', true)}
+            onExport={format => void handleExport(format)}
+            onClose={() => void requestProjectChange()}
+          />
+          <input
+            ref={schemaFile.fileInput}
+            type="file"
+            hidden
+            accept={schemaFileExtensions.join(',')}
+            onChange={event => {
+              const file = event.currentTarget.files?.[0]
+              event.currentTarget.value = ''
+              if (file) void schemaFile.openSchema(file)
+            }}
+          />
           <div className={appStyles.topbarBadge}>{schema.tables.length} tables</div>
           <RepositoryLink />
         </div>
@@ -2014,38 +2079,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
         </div>
 
         <div className={appStyles.topbarRight}>
-          <button
-            onClick={() => void handleExport('json')}
-            disabled={exporting}
-            className={appStyles.exportBtn}
-          >
-            ↓ JSON
-          </button>
-          <button
-            onClick={() => void handleExport('sql')}
-            disabled={exporting}
-            className={appStyles.exportBtn}
-          >
-            ↓ SQL
-          </button>
-          <button
-            onClick={() => void handleExport('drawio')}
-            disabled={exporting}
-            className={appStyles.exportBtn}
-          >
-            ↓ drawio
-          </button>
-          <div className={appStyles.divider} />
           <ThemeSwitch theme={theme} onToggle={onThemeToggle} />
-          <div className={appStyles.divider} />
-          <button
-            onClick={handleSave}
-            className={appStyles.saveBtn}
-            style={{ '--save-bg': saveFlash ? '#16a34a' : '#6366f1' } as React.CSSProperties}
-          >
-            {t.saveBtn}
-          </button>
-          <button onClick={handleExit} className={appStyles.exitBtn}>{t.exitBtn}</button>
         </div>
       </div>
 
@@ -2076,7 +2110,6 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
                 onNew={() => setEditorState('new')}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
-                onExit={handleExit}
               />
             )}
             <div className={appStyles.canvasArea}>
@@ -2184,7 +2217,7 @@ function AppContent({ lang, setLang, theme, onThemeToggle, onProjectExit }: {
               </div>
 
               <ThemeCtx.Provider value={theme}>
-              <ViewModeCtx.Provider value={{ mode: viewMode, bulkExpand, bulkKey, readOnly: canvasReadOnly }}>
+              <ViewModeCtx.Provider value={{ mode: viewMode, lang, bulkExpand, bulkKey, readOnly: canvasReadOnly }}>
                 <HighlightCtx.Provider value={highlightCtxValue}>
                  <EdgeHoverCtx.Provider value={edgeHoverCtxValue}>
                     <ReactFlow

@@ -1,22 +1,14 @@
-import { useRef, useState } from 'react'
-import { detectParser, parseSchema, schemaFileExtensions } from '../../utils/parsers'
-import { getHandleFromDrop, openFilePicker, supportsFileSystemAccess } from '../../utils/fileAccess'
+import { useState } from 'react'
+import { schemaFileExtensions } from '../../utils/parsers'
+import { getHandleFromDrop } from '../../utils/fileAccess'
 import { demoSchemas, openDemoSchema } from '../../utils/demoSchemas'
 import { getSaves, deleteDB, type SavedDB } from '../../utils/storage'
 import { T, type Lang } from '../../i18n'
-import type { Schema } from '../../types/schema'
+import { useSchemaFile, type OpenResult } from './useSchemaFile'
 import { Logo } from '../ui/Logo'
 import { RepositoryLink } from '../ui/RepositoryLink'
 import { ThemeSwitch } from '../ui/ThemeSwitch'
 import styles from './UploadZone.module.css'
-
-export interface OpenResult {
-  schema: Schema
-  fileHandle?: FileSystemFileHandle
-  positions?: Record<string, { x: number; y: number }>
-  saveId?: string
-  saveName?: string
-}
 
 interface Props {
   lang: Lang
@@ -33,10 +25,8 @@ function fmtDate(iso: string, lang: Lang) {
 
 export function UploadZone({ lang, theme, onThemeToggle, onOpen }: Props) {
   const t = T[lang]
-  const fileInput = useRef<HTMLInputElement>(null)
-  const [error, setError] = useState('')
+  const { fileInput, error, isOpening, openSchema, pickSchemaFile } = useSchemaFile(lang, onOpen)
   const [dragging, setDragging] = useState(false)
-  const [isOpening, setIsOpening] = useState(false)
   const [saves, setSaves] = useState<SavedDB[]>(getSaves)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
@@ -49,37 +39,6 @@ export function UploadZone({ lang, theme, onThemeToggle, onOpen }: Props) {
       setConfirmDeleteId(id)
       setTimeout(() => setConfirmDeleteId(current => current === id ? null : current), 3000)
     }
-  }
-
-  const openSchema = async (file?: File, handleRequest?: Promise<FileSystemFileHandle | null>) => {
-    setError('')
-    setIsOpening(true)
-    try {
-      const handle = await handleRequest
-      if (!file) file = await handle?.getFile()
-      if (!file) return
-      const content = await file.text()
-      const schema = parseSchema(content, detectParser(file.name, content))
-      if (!schema.tables.length) throw new Error(t.noTablesFound)
-      onOpen({ schema, fileHandle: handle ?? undefined })
-    } catch (error) {
-      setError(error instanceof Error ? error.message : t.fileReadError)
-    } finally {
-      setIsOpening(false)
-    }
-  }
-
-  const handleOpenClick = async () => {
-    if (supportsFileSystemAccess()) {
-      try {
-        const handle = await openFilePicker(schemaFileExtensions)
-        if (handle) await openSchema(undefined, Promise.resolve(handle))
-        return
-      } catch {
-        // Some browsers expose the native picker but block it in embedded pages.
-      }
-    }
-    fileInput.current?.click()
   }
 
   const onDrop = (event: React.DragEvent<HTMLButtonElement>) => {
@@ -125,7 +84,7 @@ export function UploadZone({ lang, theme, onThemeToggle, onOpen }: Props) {
           <button
             type="button"
             className={`${styles.action} ${dragging ? styles.dropActive : ''}`}
-            onClick={handleOpenClick}
+            onClick={pickSchemaFile}
             onDragOver={event => {
               event.preventDefault()
               if (!isOpening) setDragging(true)

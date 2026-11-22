@@ -9,12 +9,13 @@ import type { Schema } from '../../types/schema'
 import styles from './SchemaEditor.module.css'
 
 const KEYWORDS = new Set(['Table', 'Relations', 'Layout'])
-const MODIFIERS = new Set(['pk', 'unique', 'null', 'view'])
+const MODIFIERS = new Set(['pk', 'unique', 'null', 'view', 'comment'])
 
 const schemaLang = StreamLanguage.define<Record<string, never>>({
   startState: () => ({}),
   token(stream) {
     if (stream.eatSpace()) return null
+    if (stream.match(/"(?:[^"\\]|\\.)*"/)) return 'string'
     if (stream.match(/\/\/[^\n]*/)) return 'comment'
     if (stream.match(/--[^\n]*/)) return 'comment'
     if (stream.eat('{') || stream.eat('}')) return 'bracket'

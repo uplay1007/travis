@@ -14,10 +14,9 @@ interface Props {
   onNew: () => void
   onEdit: (table: Table) => void
   onDelete: (tableName: string) => void
-  onExit: () => void
 }
 
-export function Sidebar({ tables, lang, readOnly, onLangToggle, onNew, onEdit, onDelete, onExit }: Props) {
+export function Sidebar({ tables, lang, readOnly, onLangToggle, onNew, onEdit, onDelete }: Props) {
   const t = T[lang]
   const [search, setSearch] = useState('')
   const filtered = search.trim()
@@ -82,11 +81,6 @@ export function Sidebar({ tables, lang, readOnly, onLangToggle, onNew, onEdit, o
         })}
       </div>
 
-      <div className={styles.footer}>
-        <button onClick={onExit} className={styles.exitBtn}>
-          {T[lang].exitBtn}
-        </button>
-      </div>
     </div>
   )
 }

@@ -29,6 +29,7 @@ export async function pickSaveFile(
   extension: string,
   mimeType: string,
   description: string,
+  suggestedName = `schema.${extension}`,
 ): Promise<FileSystemFileHandle | null | undefined> {
   const pickerWindow = window as Window & {
     showSaveFilePicker?: (options: SavePickerOptions) => Promise<FileSystemFileHandle>
@@ -37,7 +38,7 @@ export async function pickSaveFile(
 
   try {
     return await pickerWindow.showSaveFilePicker({
-      suggestedName: `schema.${extension}`,
+      suggestedName,
       types: [{ description, accept: { [mimeType]: [`.${extension}`] } }],
     })
   } catch (error) {

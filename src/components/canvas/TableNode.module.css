@@ -153,9 +153,6 @@
 
 .columnRow {
   position: relative; /* anchors the per-column connection handles */
-  display: flex;
-  align-items: center;
-  gap: 6px;
   padding: 4px 12px;
   border-radius: 4px;
   max-height: 40px;
@@ -165,6 +162,42 @@
     padding 0.28s cubic-bezier(0.4, 0, 0.2, 1),
     opacity 0.18s ease;
 }
+
+.columnLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.columnRowExtended { max-height: 80px; }
+
+.columnComment {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  margin: 2px 0 1px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.commentButton {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.commentButton svg { width: 15px; height: 15px; }
+.commentButton:hover { background: rgba(var(--overlay-rgb), 0.11); }
+.commentButton:focus-visible { outline: 2px solid #818cf8; outline-offset: -1px; }
 
 /* non-key row collapsed in compact mode */
 .columnRowHidden {

@@ -94,6 +94,7 @@ export function schemaToDSL(schema: Schema, masterPositions: Record<string, { x:
       if (c.primaryKey) parts.push('pk')
       if (c.unique && !c.primaryKey) parts.push('unique')
       if (c.nullable) parts.push('null')
+      if (c.comment) parts.push('comment', JSON.stringify(c.comment))
       return '  ' + parts.join(' ')
     })
     return `Table ${t.name} {\n${cols.join('\n')}\n}`
@@ -195,8 +196,18 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
 
     if (mode === 'table') {
       if (line === '}') { mode = 'none'; cur = null; curCols = null; continue }
-      if (line.includes('>')) diagnostics.push({ line: lineNo, message: `Put relations in the Relations { } block, not inside a table` })
-      const [, colName, definition = ''] = /^(\S+)(?:\s+(.+))?$/.exec(line)!
+      const [, colName, rawDefinition = ''] = /^(\S+)(?:\s+(.+))?$/.exec(line)!
+      const suffix = /\s+comment\s+("(?:[^"\\]|\\.)*")$/i.exec(rawDefinition)
+      const definition = suffix ? rawDefinition.slice(0, suffix.index) : rawDefinition
+      let comment: string | undefined
+      if (suffix) {
+        try {
+          comment = JSON.parse(suffix[1])
+        } catch {
+          diagnostics.push({ line: lineNo, message: `Invalid quoted comment for column "${colName}"` })
+        }
+      }
+      if (definition.includes('>')) diagnostics.push({ line: lineNo, message: `Put relations in the Relations { } block, not inside a table` })
       const modifiers = /(?:\s+(?:pk|unique|null))+$/.exec(definition)
       const colType = modifiers ? definition.slice(0, modifiers.index) : definition
       if (!IDENT.test(colName)) diagnostics.push({ line: lineNo, message: `Invalid column name "${colName}" — latin letters, digits and _ only` })
@@ -209,6 +220,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
         if (curCols.has(colName)) diagnostics.push({ line: lineNo, message: `Duplicate column "${colName}" in "${cur.name}"` })
         curCols.add(colName)
         const col: Column = { name: colName, type: colType ?? 'varchar' }
+        if (comment) col.comment = comment
         for (const f of modifiers?.[0].trim().split(/\s+/) ?? []) {
           if (f === 'pk') col.primaryKey = true
           else if (f === 'unique') col.unique = true
@@ -272,7 +284,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
     let view: Layout['viewMode'] | undefined
     let locked = false
     for (const { line, text: raw } of block.lines) {
-      const vm = /^view\s+(full|compact|collapsed)\s*$/i.exec(raw)
+      const vm = /^view\s+(full|compact|collapsed|extended)\s*$/i.exec(raw)
       if (vm) { view = vm[1].toLowerCase() as Layout['viewMode']; continue }
       // `locked: true` rather than a bare `locked` keyword — a bare reserved
       // word would share the line-namespace with the "<table> x y" position
@@ -286,7 +298,7 @@ export function dslToSchema(text: string, prevSchema?: Schema): DSLResult {
         else positions[tblName] = { x: parseFloat(xs), y: parseFloat(ys) }
         continue
       }
-      diagnostics.push({ line, message: `Invalid line in layout block — expected "table x y", "view <full|compact|collapsed>" or "locked: true"` })
+      diagnostics.push({ line, message: `Invalid line in layout block — expected "table x y", "view <full|compact|collapsed|extended>" or "locked: true"` })
     }
     if (!block.name) continue
     if (block.name === ALL_TABLES_LAYOUT) {

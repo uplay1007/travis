@@ -254,8 +254,9 @@
   border-collapse: collapse;
 }
 
-.typeColumn { width: 21%; }
+.typeColumn { width: 17%; }
 .flagColumn { width: 42px; }
+.foreignKeyColumn { width: 17%; }
 .actionsColumn { width: 108px; }
 
 .thead {
@@ -519,7 +520,7 @@
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 800px) {
   .overlay {
     padding: 8px;
   }
@@ -579,7 +580,8 @@
   }
 
   .columnField,
-  .foreignKeyCell {
+  .foreignKeyCell,
+  .commentCell {
     display: grid;
     align-content: end;
     gap: 4px;
@@ -587,7 +589,8 @@
 
   .columnField { grid-column: span 4; }
   .flagCell { grid-column: span 2; }
-  .foreignKeyCell { grid-column: span 5; }
+  .foreignKeyCell { grid-column: 1 / -1; }
+  .commentCell { grid-column: span 5; }
   .actionsCell { grid-column: span 3; align-self: end; }
 
   .flagControl {
@@ -603,6 +606,6 @@
 }
 
 @media (max-width: 350px) {
-  .foreignKeyCell { grid-column: span 4; }
+  .commentCell { grid-column: span 4; }
   .actionsCell { grid-column: span 4; }
 }

@@ -1,4 +1,4 @@
-import type { Schema, Table, Column, Layout, TableType } from '../types/schema'
+import type { Schema, Table, Column, Layout, TableType, ViewMode } from '../types/schema'
 import { tagColor } from './colors'
 
 // ── Public JSON format ─────────────────────────────────────────────────────
@@ -11,6 +11,7 @@ export interface StructuredColumn {
   pk?: boolean
   unique?: boolean
   nullable?: boolean
+  comment?: string
 }
 export interface StructuredTable {
   name: string
@@ -20,7 +21,7 @@ export interface StructuredTable {
 }
 export interface StructuredLayout {
   name: string
-  parameters: { view: 'full' | 'compact' | 'collapsed'; locked?: boolean }
+  parameters: { view: ViewMode; locked?: boolean }
   positions: Record<string, { x: number; y: number }>
 }
 export interface StructuredGroup {
@@ -51,6 +52,7 @@ export function schemaToStructured(schema: Schema, masterPositions: Record<strin
       if (c.primaryKey) col.pk = true
       if (c.unique) col.unique = true
       if (c.nullable) col.nullable = true
+      if (c.comment) col.comment = c.comment
       return col
     }),
   }))
@@ -114,6 +116,7 @@ export function structuredToSchema(raw: StructuredSchema): Schema {
       const col: Column = { name: c.name, type: c.type || 'varchar', nullable: c.nullable ?? false }
       if (c.pk) col.primaryKey = true
       if (c.unique) col.unique = true
+      if (typeof c.comment === 'string' && c.comment) col.comment = c.comment
       return col
     })
     const table: Table = { name: t.name, columns, tags: [] }

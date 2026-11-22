@@ -24,6 +24,7 @@ function splitTopLevel(s: string, separator: RegExp): string[] {
 }
 
 const COLUMN_CONSTRAINT = /^(?:not|null|default|primary|unique|references|check|constraint|collate|generated|auto_increment|comment|on|unsigned|zerofill)(?:$|\()/i
+const COMMENT_ESCAPES: Record<string, string> = { b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' }
 
 export function parseSQL(text: string): Schema {
   const tables: Table[] = []
@@ -39,15 +40,25 @@ export function parseSQL(text: string): Schema {
     tagsMap[tableName] = tags
   }
 
-  // strip comments, skipping string literals so DEFAULT '--val' is not truncated
-  const clean = text
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/'[^']*'|--[^\n]*/g, m => m.startsWith("'") ? m : '')
+  // Preserve quoted SQL values while stripping source-code comments.
+  const clean = text.replace(/\bE'(?:\\[\s\S]|''|[^'\\])*'|'(?:''|[^'])*'|\/\*[\s\S]*?\*\/|--[^\n]*/gi,
+    token => token.startsWith('/*') || token.startsWith('--') ? ' ' : token)
+
+  const columnComments: { table: string; column: string; text?: string }[] = []
+  const definitions = clean.replace(/(^|;)\s*COMMENT\s+ON\s+COLUMN\s+"?(\w+)"?\s*\.\s*"?(\w+)"?\s+IS\s+(?:E'((?:\\[\s\S]|''|[^'\\])*)'|'((?:''|[^'])*)'|NULL)\s*(?=;|$)/gi,
+    (_statement, prefix: string, table: string, column: string, escaped?: string, literal?: string) => {
+      const value = escaped === undefined
+        ? literal?.replace(/''/g, "'")
+        : escaped.replace(/''|\\([\s\S])/g, (part, char: string) =>
+          part === "''" ? "'" : (COMMENT_ESCAPES[char] ?? char))
+      columnComments.push({ table, column, text: value || undefined })
+      return prefix
+    })
 
   const createRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"']?(\w+)[`"']?\s*\(([^;]+)\)/gi
   let m: RegExpExecArray | null
 
-  while ((m = createRegex.exec(clean)) !== null) {
+  while ((m = createRegex.exec(definitions)) !== null) {
     const name = m[1]
     const body = m[2]
     const columns: Column[] = []
@@ -114,10 +125,15 @@ export function parseSQL(text: string): Schema {
   const tableByName = new Map(tables.map(t => [t.name, t]))
   const alterRe = /ALTER\s+TABLE\s+[`"']?(\w+)[`"']?\s+ADD\s+(?:CONSTRAINT\s+[`"']?\w+[`"']?\s+)?FOREIGN\s+KEY\s*\(([^)]+)\)\s*REFERENCES\s+[`"']?(\w+)[`"']?\s*\(([^)]+)\)/gi
   let a: RegExpExecArray | null
-  while ((a = alterRe.exec(clean)) !== null) {
+  while ((a = alterRe.exec(definitions)) !== null) {
     const colName = a[2].replace(/[`"']/g, '').trim()
     const col = tableByName.get(a[1])?.columns.find(c => c.name === colName)
     if (col) col.foreignKey = { table: a[3], column: a[4].replace(/[`"']/g, '').trim() }
+  }
+
+  for (const { table, column, text } of columnComments) {
+    const field = tableByName.get(table)?.columns.find(c => c.name === column)
+    if (field) field.comment = text
   }
 
   // re-sort now that ALTER-added FKs are in place (PK → FK → rest)
@@ -190,6 +206,12 @@ export function exportSQL(schema: Schema): string {
     }
   }
 
-  const ddl = blocks.join('\n\n')
-  return (fks.length ? `${ddl}\n\n${fks.join('\n')}` : ddl) + '\n'
+  const comments = schema.tables.flatMap(table => table.columns.flatMap(col => {
+    if (!col.comment) return []
+    const tableName = table.name.replace(/"/g, '""')
+    const columnName = col.name.replace(/"/g, '""')
+    const value = col.comment.replace(/\\/g, '\\\\').replace(/'/g, "''")
+    return [`COMMENT ON COLUMN "${tableName}"."${columnName}" IS E'${value}';`]
+  }))
+  return [blocks.join('\n\n'), fks.join('\n'), comments.join('\n')].filter(Boolean).join('\n\n') + '\n'
 }

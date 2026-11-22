@@ -24,7 +24,7 @@
   /* On a narrower browser window (a non-maximized window, a smaller laptop
      panel, or Windows' 125–150% OS display scaling shrinking the effective
      CSS viewport) the toolbar's total content is wider than the window. With
-     no wrap, the tail end of the bar (Organize, JSON toggle, exports, Save)
+     no wrap, the tail end of the bar
      simply became invisible with no way to reach it. Wrapping onto a second
      line keeps every control reachable — NOT overflow-x/y:auto (tried that
      first): the Groups/Layouts dropdowns are position:absolute children that
@@ -70,62 +70,6 @@
   align-items: center;
   gap: 8px;
   padding-right: 20px;
-}
-
-.exportBtn {
-  font-size: 14px;
-  color: #6b7280;
-  padding: 7px 14px;
-  border: 1px solid rgba(var(--overlay-rgb), 0.1);
-  border-radius: 8px;
-  background: none;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.exportBtn:hover {
-  background: rgba(var(--overlay-rgb), 0.1);
-}
-
-.divider {
-  width: 1px;
-  height: 22px;
-  background: rgba(var(--overlay-rgb), 0.1);
-  margin: 0 4px;
-}
-
-.saveBtn {
-  font-size: 15px;
-  padding: 7px 18px;
-  border-radius: 8px;
-  font-weight: 500;
-  color: white;
-  border: none;
-  cursor: pointer;
-  min-width: 90px;
-  transition: filter 0.15s;
-  /* --save-bg set inline for flash animation */
-  background: var(--save-bg, #6366f1);
-}
-
-.saveBtn:hover {
-  filter: brightness(1.1);
-}
-
-.exitBtn {
-  font-size: 14px;
-  color: #6b7280;
-  padding: 7px 14px;
-  border: 1px solid rgba(var(--overlay-rgb), 0.1);
-  border-radius: 8px;
-  background: none;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.exitBtn:hover {
-  color: var(--text-on-surface);
-  background: rgba(var(--overlay-rgb), 0.1);
 }
 
 /* ── Content area ─────────────────────────────────────────────────── */

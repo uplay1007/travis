@@ -150,7 +150,11 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
       return
     }
 
-    const saved: Table = { name: trimmedName, columns, tags: canAddTag ? [...tags, pendingTag] : tags }
+    const saved: Table = {
+      name: trimmedName,
+      columns: columns.map(column => ({ ...column, comment: column.comment?.trim() ? column.comment : undefined })),
+      tags: canAddTag ? [...tags, pendingTag] : tags,
+    }
     if (tableType) saved.type = tableType
     if (color) saved.color = color
     onSave(saved, table?.name ?? null)
@@ -208,6 +212,7 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
                       <col />
                       <col className={styles.typeColumn} />
                       <col span={4} className={styles.flagColumn} />
+                      <col className={styles.foreignKeyColumn} />
                       <col />
                       <col className={styles.actionsColumn} />
                     </colgroup>
@@ -219,6 +224,7 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
                           <th role="columnheader" scope="col" key={code} title={label} className={styles.flagHeading}>{code}</th>
                         ))}
                         <th role="columnheader" scope="col">{t.foreignKey}</th>
+                        <th role="columnheader" scope="col">{t.columnComment}</th>
                         <th role="columnheader" scope="col" className={styles.actionsHeading}>{t.columnActions}</th>
                       </tr>
                     </thead>
@@ -269,6 +275,15 @@ export function TableEditor({ table, schema, lang, onSave, onClose }: Props) {
                                 <span>{target ?? (lang === 'ru' ? 'Связать' : 'Link')}</span>
                                 <span aria-hidden="true">→</span>
                               </button>
+                            </td>
+                            <td role="cell" className={styles.commentCell}>
+                              <span className={styles.mobileLabel} aria-hidden="true">{t.columnComment}</span>
+                              <input
+                                type="text"
+                                aria-label={`${t.columnComment} ${index + 1}`}
+                                value={column.comment ?? ''}
+                                onChange={event => updateCol(index, { comment: event.target.value })}
+                              />
                             </td>
                             <td role="cell" className={styles.actionsCell}>
                               <div className={styles.rowActions}>

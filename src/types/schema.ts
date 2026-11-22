@@ -6,6 +6,7 @@ export interface ForeignKey {
 export interface Column {
   name: string
   type: string
+  comment?: string
   primaryKey?: boolean
   foreignKey?: ForeignKey
   nullable?: boolean
@@ -26,12 +27,14 @@ export interface Table {
   color?: string
 }
 
+export type ViewMode = 'collapsed' | 'compact' | 'full' | 'extended'
+
 export interface Layout {
   id: string
   name: string
   tables: string[]                                    // table names shown in this layout
   positions: Record<string, { x: number; y: number }> // per-layout table positions
-  viewMode?: 'full' | 'compact' | 'collapsed'          // per-layout detail level
+  viewMode?: ViewMode                                 // per-layout detail level
   locked?: boolean                                     // when true, tables can't be dragged on this layout's canvas
 }
 

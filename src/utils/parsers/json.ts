@@ -15,6 +15,7 @@ export function parseJSON(text: string): Schema {
     for (const c of t.columns) {
       if (typeof c.name !== 'string' || !c.name) throw new Error(`Column in "${t.name}" missing name`)
       if (typeof c.type !== 'string' || !c.type) throw new Error(`Column "${c.name}" in "${t.name}" missing type`)
+      if (typeof c.comment !== 'string') delete c.comment
     }
   }
   return raw as Schema

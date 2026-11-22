@@ -225,26 +225,3 @@
 .deleteBtn:hover {
   background: rgba(239, 68, 68, 0.2);
 }
-
-.footer {
-  padding: 16px 20px;
-  border-top: 1px solid rgba(var(--overlay-rgb), 0.1);
-}
-
-.exitBtn {
-  width: 100%;
-  padding: 10px;
-  border-radius: 12px;
-  font-weight: 500;
-  font-size: 14px;
-  color: #6b7280;
-  border: 1px solid rgba(var(--overlay-rgb), 0.08);
-  background: none;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.exitBtn:hover {
-  background: rgba(var(--overlay-rgb), 0.05);
-  color: var(--text-on-surface);
-}

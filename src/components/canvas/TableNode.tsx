@@ -4,6 +4,8 @@ import { tableAccent } from '../../utils/colors'
 import { HighlightCtx } from '../../contexts/highlight'
 import { EdgeHoverCtx } from '../../contexts/edgeHover'
 import { ViewModeCtx } from '../../contexts/viewMode'
+import { useDialog } from '../../contexts/DialogContext'
+import { T } from '../../i18n'
 import type { Table, Column } from '../../types/schema'
 import styles from './TableNode.module.css'
 
@@ -43,16 +45,38 @@ function Badge({ label, color }: { label: string; color: string }) {
 function ColumnRow({ col, accent, linked, hidden }: {
   col: Column; accent: string; linked: boolean; hidden: boolean
 }) {
+  const { mode, lang } = useContext(ViewModeCtx)
+  const dialog = useDialog()
+  const hasComment = typeof col.comment === 'string' && col.comment.trim().length > 0
+  const comment = !hidden && hasComment && (mode === 'full' || mode === 'extended') ? col.comment : undefined
+  const preview = mode === 'extended' && comment
+  const t = T[lang]
   return (
-    <div className={`${styles.columnRow} ${linked ? styles.columnRowLinked : ''} ${hidden ? styles.columnRowHidden : ''}`}>
-      <span className={styles.colName}>{col.name}</span>
-      <span className={styles.colType}>{col.type}</span>
-      <div className={styles.badges}>
-        {col.primaryKey && <Badge label="PK" color={accent} />}
-        {col.foreignKey && <Badge label="FK" color="#f59e0b" />}
-        {col.unique && !col.primaryKey && <Badge label="UQ" color="#06b6d4" />}
-        {col.nullable && <Badge label="?" color="#6b7280" />}
+    <div className={`${styles.columnRow} ${linked ? styles.columnRowLinked : ''} ${hidden ? styles.columnRowHidden : ''} ${preview ? styles.columnRowExtended : ''}`}>
+      <div className={styles.columnLine}>
+        <span className={styles.colName}>{col.name}</span>
+        <span className={styles.colType}>{col.type}</span>
+        <div className={styles.badges}>
+          {col.primaryKey && <Badge label="PK" color={accent} />}
+          {col.foreignKey && <Badge label="FK" color="#f59e0b" />}
+          {col.unique && !col.primaryKey && <Badge label="UQ" color="#06b6d4" />}
+          {col.nullable && <Badge label="?" color="#6b7280" />}
+        </div>
+        {comment && (
+          <button
+            type="button"
+            className={`nodrag ${styles.commentButton}`}
+            aria-label={t.showColumnComment(col.name)}
+            title={t.showColumnComment(col.name)}
+            onClick={event => { event.stopPropagation(); void dialog.alert(t.showColumnComment(col.name), comment) }}
+          >
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3 3h10v7H8l-3 3v-3H3zM5.5 6h5" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
       </div>
+      {preview && <p className={styles.columnComment}>{preview}</p>}
     </div>
   )
 }
@@ -84,7 +108,7 @@ export const TableNode = memo(({ data }: NodeProps) => {
     updateNodeInternals(nodeId)
     const t = setTimeout(() => updateNodeInternals(nodeId), 320)
     return () => clearTimeout(t)
-  }, [expanded, nodeId, updateNodeInternals])
+  }, [expanded, nodeId, updateNodeInternals, viewMode, table.columns])
 
   const isHighlighted = hl.active && hl.highlighted.has(table.name)
   const isDimmed = hl.active && !hl.highlighted.has(table.name)
